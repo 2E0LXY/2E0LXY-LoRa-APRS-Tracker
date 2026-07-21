@@ -1,0 +1,192 @@
+/**
+ * 2E0LXY LoRa APRS Tracker
+ * Standalone firmware for the LilyGO T-Deck Plus
+ *
+ * Features:
+ *   - SX1262 LoRa APRS transceiver (439.9125 MHz UK)
+ *   - SmartBeaconing with corner-pegging
+ *   - Two-way APRS messaging via T-Deck keyboard
+ *   - Live station list (heard via LoRa RF or APRS-IS)
+ *   - APRS-IS gateway via WiFi (www.aprsnet.uk:14580)
+ *   - aprsnet.uk MQTT telemetry + remote control
+ *   - ST7789 320×240 TFT — status / station list / message views
+ *   - MicroSD ready (future offline map)
+ *   - OTA firmware update from GitHub releases
+ *
+ * Hardware: LilyGO T-Deck Plus (ESP32-S3, 16MB Flash, 8MB PSRAM)
+ * Repository: https://github.com/2E0LXY/2E0LXY-LoRa-APRS-Tracker
+ */
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include "board_pins.h"
+#include "configuration.h"
+#include "gps_utils.h"
+#include "lora_utils.h"
+#include "aprs_utils.h"
+#include "beacon_utils.h"
+#include "mqtt_utils.h"
+#include "display_utils.h"
+#include "keyboard_utils.h"
+#include "messaging.h"
+#include "ota_utils.h"
+
+// ── Forward declarations ──────────────────────────────────────────────────
+void handleKeyInput(char key);
+void handleLoRaRx(const String& packet, float rssi, float snr);
+void handleAPRSMessage(const String& from, const String& text, const String& msgID);
+
+// ── APRS message callback (override weak symbol in aprs_utils) ────────────
+namespace APRS_Utils {
+void onMessageReceived(const ParsedPacket& p) {
+    handleAPRSMessage(p.fromCall, p.text, p.msgID);
+}
+}
+
+// ── Setup ─────────────────────────────────────────────────────────────────
+void setup() {
+    Serial.begin(115200);
+    delay(200);
+    Serial.println("\n\n=== 2E0LXY LoRa APRS Tracker ===");
+
+    // Power on peripheral rail
+    pinMode(BOARD_POWERON, OUTPUT);
+    digitalWrite(BOARD_POWERON, HIGH);
+    delay(100);
+
+    // Load config (or use defaults)
+    bool cfgOk = loadConfig();
+    Serial.printf("Config: %s\n", cfgOk ? "loaded" : "using defaults");
+
+    // Display
+    Display_Utils::setup();
+
+    // GPS
+    GPS_Utils::setup();
+
+    // Keyboard
+    Keyboard_Utils::setup();
+
+    // LoRa
+    if (!LoRa_Utils::setup()) {
+        Display_Utils::showMessage("LoRa Error", "SX1262 init failed — check hardware", TFT_RED);
+        delay(3000);
+    }
+
+    // WiFi (non-blocking)
+    if (Config.wifi.enabled && Config.wifi.ssid.length() > 0) {
+        WiFi.mode(WIFI_STA);
+        WiFi.begin(Config.wifi.ssid.c_str(), Config.wifi.password.c_str());
+        Serial.printf("WiFi: connecting to %s\n", Config.wifi.ssid.c_str());
+    }
+
+    Serial.printf("Callsign: %s  Freq: %.4f MHz  SF%d\n",
+        fullCallsign().c_str(), Config.lora.freq, Config.lora.sf);
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────
+void loop() {
+    // GPS NMEA
+    GPS_Utils::loop();
+
+    // LoRa receive
+    LoRa_Utils::loop();
+    if (LoRa_Utils::hasPacket()) {
+        String pkt = LoRa_Utils::getPacket();
+        handleLoRaRx(pkt, LoRa_Utils::lastRSSI(), LoRa_Utils::lastSNR());
+    }
+
+    // SmartBeacon
+    Beacon_Utils::loop();
+
+    // APRS-IS
+    if (WiFi.isConnected()) {
+        APRS_Utils::loop();
+        MQTT_Utils::loop();
+    }
+
+    // Keyboard input
+    if (Keyboard_Utils::available()) {
+        char k = Keyboard_Utils::getKey();
+        if (k) handleKeyInput(k);
+    }
+
+    // Display refresh
+    Display_Utils::loop();
+
+    // Messaging
+    Messaging::loop();
+
+    // OTA check (every 6 hours)
+    OTA_Utils::loop();
+}
+
+// ── LoRa receive handler ──────────────────────────────────────────────────
+void handleLoRaRx(const String& packet, float rssi, float snr) {
+    Serial.printf("LoRa RX [%.0fdBm SNR%.1f]: %s\n", rssi, snr, packet.c_str());
+
+    ParsedPacket p = APRS_Utils::parsePacket(packet);
+    p.rssi = rssi;
+    p.snr  = snr;
+
+    if (p.valid && p.hasPosition) {
+        APRS_Utils::updateStation(p.fromCall, p);
+    }
+
+    // Gate LoRa to APRS-IS
+    if (p.valid && Config.beacon.aprsIsEnabled && APRS_Utils::isConnected()) {
+        APRS_Utils::sendPacketIS(packet);
+    }
+
+    if (p.isMessage) {
+        if (p.toCall.trim() == fullCallsign()) {
+            handleAPRSMessage(p.fromCall, p.text, p.msgID);
+        }
+    }
+}
+
+// ── Message received ──────────────────────────────────────────────────────
+void handleAPRSMessage(const String& from, const String& text, const String& msgID) {
+    Serial.printf("MSG from %s: %s {%s}\n", from.c_str(), text.c_str(), msgID.c_str());
+    Messaging::receive(from, text, msgID);
+    Display_Utils::showMessage("MSG: " + from, text, TFT_CYAN);
+
+    // Send ACK
+    String ack = APRS_Utils::buildAckPacket(from, msgID);
+    if (Config.beacon.loraEnabled)   LoRa_Utils::sendPacket(ack);
+    if (APRS_Utils::isConnected())   APRS_Utils::sendPacketIS(ack);
+}
+
+// ── Keyboard navigation & input ───────────────────────────────────────────
+void handleKeyInput(char key) {
+    // View switching
+    if (key == '1') { Display_Utils::setView(VIEW_STATUS);   return; }
+    if (key == '2') { Display_Utils::setView(VIEW_STATIONS); return; }
+    if (key == '3') { Display_Utils::setView(VIEW_MESSAGES); return; }
+
+    // Manual beacon
+    if (key == 'B' || key == 'b') {
+        Beacon_Utils::sendBeacon();
+        Display_Utils::showMessage("Beacon", "Manual beacon sent", TFT_GREEN);
+        return;
+    }
+
+    // In message compose mode
+    if (Display_Utils::getView() == VIEW_MESSAGES) {
+        if (key == '\r' || key == '\n') {
+            // Send the composed message
+            String buf = Keyboard_Utils::getBuffer();
+            String dest = Messaging::getReplyTarget();
+            if (buf.length() > 0 && dest.length() > 0) {
+                String pkt = APRS_Utils::buildMessagePacket(dest, buf, Messaging::nextMsgID());
+                if (Config.beacon.loraEnabled)  LoRa_Utils::sendPacket(pkt);
+                if (APRS_Utils::isConnected())  APRS_Utils::sendPacketIS(pkt);
+                Messaging::markSent(dest, buf);
+                Keyboard_Utils::clearBuffer();
+                Display_Utils::showMessage("Sent", "→ " + dest, TFT_GREEN);
+            }
+        } else {
+            Keyboard_Utils::appendToBuffer(key);
+        }
+    }
+}
