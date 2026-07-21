@@ -74,6 +74,13 @@ struct MsgConfig {
     String   defaultRoute    = "lora";
 };
 
+// ── Region ───────────────────────────────────────────────────────────────
+struct RegionConfig {
+    String  profileId       = "uk";     // matches a RegionalProfile id
+    bool    txConfirmed     = false;    // TX disabled until operator confirms
+    String  timezone        = "GMT0BST,M3.5.0/1,M10.5.0/2";
+};
+
 // ── Root config ──────────────────────────────────────────────────────────
 struct Configuration {
     APRSConfig    aprs;
@@ -83,7 +90,8 @@ struct Configuration {
     MQTTConfig    mqtt;
     DisplayConfig display;
     MsgConfig     msg;
-    String        fwVersion = "1.1.0";
+    RegionConfig  region;
+    String        fwVersion = "1.2.0";
 };
 
 extern Configuration Config;
@@ -93,3 +101,4 @@ bool saveConfig();
 void resetConfig();
 String  fullCallsign();   // e.g. "2E0LXY-9"
 int     calcPasscode(const String& call);
+bool    applyRegionProfile(const String& id);  // sets freq/sf/bw/cr/power/server/tz
