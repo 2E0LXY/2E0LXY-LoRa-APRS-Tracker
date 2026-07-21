@@ -99,6 +99,11 @@ struct WeatherConfig {
     float   pressOffset = 0.0f;
 };
 
+// ── Device / radios ──────────────────────────────────────────────────────
+struct DeviceConfig {
+    bool bleEnabled = false;   // BLE KISS TNC — OFF by default (saves RAM at boot)
+};
+
 // ── Region ───────────────────────────────────────────────────────────────
 struct RegionConfig {
     String  profileId       = "uk";     // matches a RegionalProfile id
@@ -117,6 +122,7 @@ struct Configuration {
     MsgConfig     msg;
     RegionConfig  region;
     WeatherConfig weather;
+    DeviceConfig  device;
     OpProfile     profiles[4];       // Walking / Car / Bicycle / Stationary
     int           activeProfile = 1; // default: Car
     String        fwVersion = "1.2.0";
