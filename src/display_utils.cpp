@@ -124,7 +124,7 @@ static void drawStatusView() {
     // Key hints
     tft.setTextColor(C_GREY, C_BG);
     tft.setCursor(4, TFT_HEIGHT - 12);
-    tft.print("1:Status 2:Stations 3:Msgs 4:Setup(WiFi) B:Beacon");
+    tft.print("1:Sts 2:Stn 3:Msg 4:WiFi 5:Prof 6:USB B:Bcn");
 }
 
 static void drawStationList() {
@@ -363,3 +363,31 @@ void Display_Utils::showMessage(const String& title, const String& body, uint16_
     }
     if (line.length()) { tft.setCursor(28, tft.getCursorY()); tft.println(line); }
 }
+// Full-screen USB drive mode notice. Handles \n line breaks manually.
+void Display_Utils::drawUsbMscScreen(const String& body) {
+    tft.fillScreen(0x0000);
+    tft.setTextColor(C_ACCENT, 0x0000);
+    tft.setTextSize(2);
+    tft.setCursor(40, 20);
+    tft.print("USB DRIVE MODE");
+    tft.setTextSize(1);
+    tft.setTextColor(C_WHITE, 0x0000);
+    int y = 70;
+    String line;
+    for (char c : body + '\n') {
+        if (c == '\n') {
+            tft.setCursor(20, y);
+            tft.print(line);
+            line = "";
+            y += 16;
+        } else {
+            line += c;
+        }
+    }
+    // USB icon-ish flourish
+    tft.drawRect(20, 200, 280, 30, C_ACCENT);
+    tft.setTextColor(C_AMBER, 0x0000);
+    tft.setCursor(28, 210);
+    tft.print("Card: /tiles/z/x/y.png expected by map");
+}
+
