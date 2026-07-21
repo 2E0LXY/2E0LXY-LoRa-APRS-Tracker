@@ -1,5 +1,4 @@
 #include "display_utils.h"
-#include <WiFi.h>
 #include "board_pins.h"
 #include "configuration.h"
 #include "gps_utils.h"
