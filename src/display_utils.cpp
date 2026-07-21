@@ -7,6 +7,7 @@
 #include "lora_utils.h"
 #include "mqtt_utils.h"
 #include <TFT_eSPI.h>
+#include <WiFi.h>
 
 static TFT_eSPI tft = TFT_eSPI();
 static DisplayView currentView = VIEW_STATUS;
