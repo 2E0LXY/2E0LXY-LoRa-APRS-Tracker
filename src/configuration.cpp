@@ -78,6 +78,33 @@ bool loadConfig() {
     Config.region.txConfirmed = doc["region"]["tx_ok"]    | false;
     Config.region.timezone    = doc["region"]["tz"]       | "GMT0BST,M3.5.0/1,M10.5.0/2";
 
+    Config.weather.enabled    = doc["weather"]["enabled"]  | false;
+    Config.weather.txWx       = doc["weather"]["tx"]       | false;
+    Config.weather.wxInterval = doc["weather"]["interval"] | 600;
+    Config.weather.tempOffset = doc["weather"]["t_offset"] | 0.0f;
+
+    initDefaultProfiles();
+    Config.activeProfile = doc["active_profile"] | 1;
+    JsonArray profs = doc["profiles"].as<JsonArray>();
+    if (!profs.isNull()) {
+        int i = 0;
+        for (JsonObject po : profs) {
+            if (i >= 4) break;
+            Config.profiles[i].name      = po["name"]      | Config.profiles[i].name;
+            Config.profiles[i].ssid      = po["ssid"]      | Config.profiles[i].ssid;
+            Config.profiles[i].symbol    = po["symbol"]    | Config.profiles[i].symbol;
+            Config.profiles[i].comment   = po["comment"]   | Config.profiles[i].comment;
+            Config.profiles[i].smart     = po["smart"]     | Config.profiles[i].smart;
+            Config.profiles[i].slowRate  = po["slow"]      | Config.profiles[i].slowRate;
+            Config.profiles[i].fastRate  = po["fast"]      | Config.profiles[i].fastRate;
+            Config.profiles[i].speedThr  = po["speed_th"]  | Config.profiles[i].speedThr;
+            Config.profiles[i].turnAngle = po["turn"]      | Config.profiles[i].turnAngle;
+            Config.profiles[i].minDist   = po["min_dist"]  | Config.profiles[i].minDist;
+            i++;
+        }
+    }
+    applyOpProfile(Config.activeProfile);
+
     if (Config.aprs.passcode < 0)
         Config.aprs.passcode = calcPasscode(Config.aprs.callsign);
 
@@ -135,6 +162,27 @@ bool saveConfig() {
     doc["region"]["tx_ok"]   = Config.region.txConfirmed;
     doc["region"]["tz"]      = Config.region.timezone;
 
+    doc["weather"]["enabled"]  = Config.weather.enabled;
+    doc["weather"]["tx"]       = Config.weather.txWx;
+    doc["weather"]["interval"] = Config.weather.wxInterval;
+    doc["weather"]["t_offset"] = Config.weather.tempOffset;
+
+    doc["active_profile"] = Config.activeProfile;
+    JsonArray profs = doc["profiles"].to<JsonArray>();
+    for (int i = 0; i < 4; i++) {
+        JsonObject po = profs.add<JsonObject>();
+        po["name"]     = Config.profiles[i].name;
+        po["ssid"]     = Config.profiles[i].ssid;
+        po["symbol"]   = Config.profiles[i].symbol;
+        po["comment"]  = Config.profiles[i].comment;
+        po["smart"]    = Config.profiles[i].smart;
+        po["slow"]     = Config.profiles[i].slowRate;
+        po["fast"]     = Config.profiles[i].fastRate;
+        po["speed_th"] = Config.profiles[i].speedThr;
+        po["turn"]     = Config.profiles[i].turnAngle;
+        po["min_dist"] = Config.profiles[i].minDist;
+    }
+
     File f = LittleFS.open(CFG_FILE, "w");
     if (!f) return false;
     serializeJson(doc, f);
@@ -179,4 +227,42 @@ bool applyRegionProfile(const String& id) {
     Config.beacon.loraEnabled = false;
 
     return true;
+}
+
+// Populate the four built-in operating profiles with sensible defaults.
+// Only sets them if they look uninitialised (name empty).
+void initDefaultProfiles() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+
+    // Walking — slow, frequent turns matter less, hiker symbol
+    Config.profiles[0] = { "Walking", 7, "/[", "2E0LXY on foot",
+                           true, 600, 120, 3, 45, 50 };
+    // Car — the default, faster beaconing, car symbol
+    Config.profiles[1] = { "Car", 9, "/>", "2E0LXY mobile",
+                           true, 300, 30, 8, 28, 150 };
+    // Bicycle — bike symbol, medium rates
+    Config.profiles[2] = { "Bicycle", 8, "/b", "2E0LXY cycling",
+                           true, 300, 60, 5, 35, 80 };
+    // Stationary — fixed, long interval, home symbol
+    Config.profiles[3] = { "Stationary", 0, "/-", "2E0LXY fixed",
+                           false, 1800, 1800, 99, 360, 9999 };
+}
+
+// Switch the active operating profile — copies its symbol/SSID/comment and
+// SmartBeacon parameters into the live APRS + beacon config.
+void applyOpProfile(int idx) {
+    if (idx < 0 || idx > 3) idx = 1;
+    Config.activeProfile = idx;
+    const OpProfile& p = Config.profiles[idx];
+    Config.aprs.ssid    = p.ssid;
+    Config.aprs.symbol  = p.symbol;
+    Config.aprs.comment = p.comment;
+    Config.beacon.smartEnabled   = p.smart;
+    Config.beacon.slowRate       = p.slowRate;
+    Config.beacon.fastRate       = p.fastRate;
+    Config.beacon.speedThreshold = p.speedThr;
+    Config.beacon.turnAngle      = p.turnAngle;
+    Config.beacon.minDistance    = p.minDist;
 }
