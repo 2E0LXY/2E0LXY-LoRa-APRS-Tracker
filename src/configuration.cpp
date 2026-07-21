@@ -5,8 +5,7 @@ Configuration Config;
 static const char* CFG_FILE = "/config.json";
 
 int calcPasscode(const String& call) {
-    String c = call;
-    c.toUpperCase();
+    String c = call.toUpperCase();
     if (c.indexOf('-') >= 0) c = c.substring(0, c.indexOf('-'));
     int hash = 0x73e2;
     for (size_t i = 0; i < c.length(); i += 2) {
