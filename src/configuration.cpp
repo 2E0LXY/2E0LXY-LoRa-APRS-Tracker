@@ -66,6 +66,13 @@ bool loadConfig() {
     Config.display.nightMode  = doc["display"]["night"]      | false;
     Config.display.timeout    = doc["display"]["timeout"]    | 60;
 
+    Config.msg.bgColour     = doc["msg"]["bg"]        | 0x1082;
+    Config.msg.outBubble    = doc["msg"]["out_bubble"]| 0x04A9;
+    Config.msg.inBubble     = doc["msg"]["in_bubble"] | 0x3186;
+    Config.msg.outText      = doc["msg"]["out_text"]  | 0xFFFF;
+    Config.msg.inText       = doc["msg"]["in_text"]   | 0xFFFF;
+    Config.msg.defaultRoute = doc["msg"]["route"]     | "lora";
+
     if (Config.aprs.passcode < 0)
         Config.aprs.passcode = calcPasscode(Config.aprs.callsign);
 
@@ -111,6 +118,13 @@ bool saveConfig() {
     doc["display"]["brightness"] = Config.display.brightness;
     doc["display"]["night"]      = Config.display.nightMode;
     doc["display"]["timeout"]    = Config.display.timeout;
+
+    doc["msg"]["bg"]         = Config.msg.bgColour;
+    doc["msg"]["out_bubble"] = Config.msg.outBubble;
+    doc["msg"]["in_bubble"]  = Config.msg.inBubble;
+    doc["msg"]["out_text"]   = Config.msg.outText;
+    doc["msg"]["in_text"]    = Config.msg.inText;
+    doc["msg"]["route"]      = Config.msg.defaultRoute;
 
     File f = LittleFS.open(CFG_FILE, "w");
     if (!f) return false;
