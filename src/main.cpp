@@ -181,12 +181,34 @@ void handleKeyInput(char key) {
                 return;
             }
             if (dest.length() > 0) {
-                String pkt = APRS_Utils::buildMessagePacket(dest, buf, Messaging::nextMsgID());
-                if (Config.beacon.loraEnabled)  LoRa_Utils::sendPacket(pkt);
-                if (APRS_Utils::isConnected())  APRS_Utils::sendPacketIS(pkt);
-                Messaging::markSent(dest, buf);
-                Keyboard_Utils::clearBuffer();
-                Display_Utils::showMessage("Sent", "-> " + dest, TFT_GREEN);
+                bool sent = false;
+                String route = Config.msg.defaultRoute;
+
+                if (route == "server" && MQTT_Utils::isConnected()) {
+                    // aprsnet.uk store-and-forward (no RF)
+                    sent = MQTT_Utils::publishMessage(dest, buf);
+                    if (sent) Display_Utils::showMessage("Sent (server)", "-> " + dest, TFT_GREEN);
+                }
+                if (!sent && (route == "aprsis" || route == "server") && APRS_Utils::isConnected()) {
+                    // Fall back to APRS-IS over WiFi
+                    String pkt = APRS_Utils::buildMessagePacket(dest, buf, Messaging::nextMsgID());
+                    sent = APRS_Utils::sendPacketIS(pkt);
+                    if (sent) Display_Utils::showMessage("Sent (APRS-IS)", "-> " + dest, TFT_GREEN);
+                }
+                if (!sent) {
+                    // Default / fallback: LoRa RF
+                    String pkt = APRS_Utils::buildMessagePacket(dest, buf, Messaging::nextMsgID());
+                    if (Config.beacon.loraEnabled) sent = LoRa_Utils::sendPacket(pkt);
+                    // Also gate to APRS-IS if connected
+                    if (APRS_Utils::isConnected()) APRS_Utils::sendPacketIS(pkt);
+                    if (sent) Display_Utils::showMessage("Sent (LoRa)", "-> " + dest, TFT_GREEN);
+                }
+                if (sent) {
+                    Messaging::markSent(dest, buf);
+                    Keyboard_Utils::clearBuffer();
+                } else {
+                    Display_Utils::showMessage("Send failed", "No route available for " + dest, TFT_RED);
+                }
             } else {
                 Display_Utils::showMessage("No target", "Reply target not set - wait for a message first", TFT_ORANGE);
             }
