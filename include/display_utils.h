@@ -22,6 +22,7 @@ namespace Display_Utils {
     DisplayView getView();
     void        setBrightness(int v);
     void        showMessage(const String& title, const String& body, uint16_t colour = 0x07FF);
+    void        drawUsbMscScreen(const String& body);
     float       batteryVolts();
     int         batteryPercent();
 }
