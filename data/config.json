@@ -1,45 +1,11 @@
 {
-  "aprs": {
-    "callsign": "N0CALL",
-    "ssid": 9,
-    "passcode": -1,
-    "path": "WIDE1-1,WIDE2-1",
-    "comment": "2E0LXY T-Deck Plus",
-    "symbol": "/>"
-  },
-  "lora": {
-    "freq": 439.9125,
-    "sf": 12,
-    "bw": 125.0,
-    "cr": 5,
-    "power": 17
-  },
-  "beacon": {
-    "smart": true,
-    "slow": 300,
-    "fast": 30,
-    "speed_th": 5,
-    "turn": 30,
-    "min_dist": 100,
-    "aprsis": true,
-    "lora": true
-  },
-  "wifi": {
-    "ssid": "",
-    "password": "",
-    "enabled": true
-  },
-  "mqtt": {
-    "active": false,
-    "server": "80.64.216.113",
-    "port": 1883,
-    "topic": "aprsnet",
-    "user": "",
-    "pass": ""
-  },
-  "display": {
-    "brightness": 180,
-    "night": false,
-    "timeout": 60
-  }
+  "aprs":    { "callsign": "N0CALL", "ssid": 9, "passcode": -1,
+               "path": "WIDE1-1,WIDE2-1", "comment": "2E0LXY T-Deck", "symbol": "/>" },
+  "lora":    { "freq": 439.9125, "sf": 12, "bw": 125.0, "cr": 5, "power": 17, "preamble": 8 },
+  "beacon":  { "smart": true, "slow": 300, "fast": 30, "speed_th": 5,
+               "turn": 30, "min_dist": 100, "aprsis": true, "lora": true },
+  "wifi":    { "ssid": "", "password": "", "enabled": true },
+  "mqtt":    { "active": false, "server": "80.64.216.113", "port": 1883,
+               "topic": "aprsnet", "user": "", "pass": "" },
+  "display": { "brightness": 128, "night": false, "timeout": 60 }
 }
