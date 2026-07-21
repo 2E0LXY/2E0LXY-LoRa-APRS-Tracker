@@ -236,18 +236,26 @@ void initDefaultProfiles() {
     if (done) return;
     done = true;
 
-    // Walking — slow, frequent turns matter less, hiker symbol
-    Config.profiles[0] = { "Walking", 7, "/[", "2E0LXY on foot",
-                           true, 600, 120, 3, 45, 50 };
-    // Car — the default, faster beaconing, car symbol
-    Config.profiles[1] = { "Car", 9, "/>", "2E0LXY mobile",
-                           true, 300, 30, 8, 28, 150 };
-    // Bicycle — bike symbol, medium rates
-    Config.profiles[2] = { "Bicycle", 8, "/b", "2E0LXY cycling",
-                           true, 300, 60, 5, 35, 80 };
-    // Stationary — fixed, long interval, home symbol
-    Config.profiles[3] = { "Stationary", 0, "/-", "2E0LXY fixed",
-                           false, 1800, 1800, 99, 360, 9999 };
+    // Walking — slow, hiker symbol
+    Config.profiles[0].name="Walking"; Config.profiles[0].ssid=7; Config.profiles[0].symbol="/[";
+    Config.profiles[0].comment="2E0LXY on foot"; Config.profiles[0].smart=true;
+    Config.profiles[0].slowRate=600; Config.profiles[0].fastRate=120;
+    Config.profiles[0].speedThr=3; Config.profiles[0].turnAngle=45; Config.profiles[0].minDist=50;
+    // Car — the default, faster beaconing
+    Config.profiles[1].name="Car"; Config.profiles[1].ssid=9; Config.profiles[1].symbol="/>";
+    Config.profiles[1].comment="2E0LXY mobile"; Config.profiles[1].smart=true;
+    Config.profiles[1].slowRate=300; Config.profiles[1].fastRate=30;
+    Config.profiles[1].speedThr=8; Config.profiles[1].turnAngle=28; Config.profiles[1].minDist=150;
+    // Bicycle
+    Config.profiles[2].name="Bicycle"; Config.profiles[2].ssid=8; Config.profiles[2].symbol="/b";
+    Config.profiles[2].comment="2E0LXY cycling"; Config.profiles[2].smart=true;
+    Config.profiles[2].slowRate=300; Config.profiles[2].fastRate=60;
+    Config.profiles[2].speedThr=5; Config.profiles[2].turnAngle=35; Config.profiles[2].minDist=80;
+    // Stationary — fixed
+    Config.profiles[3].name="Stationary"; Config.profiles[3].ssid=0; Config.profiles[3].symbol="/-";
+    Config.profiles[3].comment="2E0LXY fixed"; Config.profiles[3].smart=false;
+    Config.profiles[3].slowRate=1800; Config.profiles[3].fastRate=1800;
+    Config.profiles[3].speedThr=99; Config.profiles[3].turnAngle=360; Config.profiles[3].minDist=9999;
 }
 
 // Switch the active operating profile — copies its symbol/SSID/comment and
