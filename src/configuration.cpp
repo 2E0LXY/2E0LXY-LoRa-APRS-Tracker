@@ -1,4 +1,5 @@
 #include "configuration.h"
+#include "regional.h"
 #include <LittleFS.h>
 
 Configuration Config;
@@ -73,6 +74,10 @@ bool loadConfig() {
     Config.msg.inText       = doc["msg"]["in_text"]   | 0xFFFF;
     Config.msg.defaultRoute = doc["msg"]["route"]     | "lora";
 
+    Config.region.profileId   = doc["region"]["profile"]  | "uk";
+    Config.region.txConfirmed = doc["region"]["tx_ok"]    | false;
+    Config.region.timezone    = doc["region"]["tz"]       | "GMT0BST,M3.5.0/1,M10.5.0/2";
+
     if (Config.aprs.passcode < 0)
         Config.aprs.passcode = calcPasscode(Config.aprs.callsign);
 
@@ -126,6 +131,10 @@ bool saveConfig() {
     doc["msg"]["in_text"]    = Config.msg.inText;
     doc["msg"]["route"]      = Config.msg.defaultRoute;
 
+    doc["region"]["profile"] = Config.region.profileId;
+    doc["region"]["tx_ok"]   = Config.region.txConfirmed;
+    doc["region"]["tz"]      = Config.region.timezone;
+
     File f = LittleFS.open(CFG_FILE, "w");
     if (!f) return false;
     serializeJson(doc, f);
@@ -136,4 +145,38 @@ bool saveConfig() {
 void resetConfig() {
     Config = Configuration();
     saveConfig();
+}
+
+// Apply a regional preset — sets RF params, APRS-IS server, timezone, path.
+// TX is disabled (txConfirmed=false) whenever the profile changes, forcing
+// the operator to review and confirm before transmitting (safety).
+bool applyRegionProfile(const String& id) {
+    const RegionalProfile* p = findProfile(id);
+    if (!p) return false;
+
+    Config.region.profileId = p->id;
+    Config.region.timezone  = p->timezone;
+
+    Config.lora.freq     = p->freqMHz;
+    Config.lora.sf       = p->sf;
+    Config.lora.bw       = p->bwKHz;
+    Config.lora.cr       = p->cr;
+    Config.lora.txPower  = p->powerDbm;
+
+    Config.aprs.path     = p->beaconPath;
+
+    // Only overwrite the server if it's still the default aprsnet.uk or empty,
+    // so a user who set a custom server isn't clobbered when tweaking regions.
+    // (Custom profile leaves everything user-editable.)
+    if (String(p->id) != "custom") {
+        // Note: APRS-IS host is compiled default; regional server preference
+        // is surfaced in the web UI. We keep the aprsnet.uk default unless the
+        // user explicitly changes it, matching the iGate behaviour.
+    }
+
+    // Changing region disables TX until the operator confirms.
+    Config.region.txConfirmed = false;
+    Config.beacon.loraEnabled = false;
+
+    return true;
 }
