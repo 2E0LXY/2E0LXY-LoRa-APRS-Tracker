@@ -7,5 +7,7 @@
   "wifi":    { "ssid": "", "password": "", "enabled": true },
   "mqtt":    { "active": false, "server": "80.64.216.113", "port": 1883,
                "topic": "aprsnet", "user": "", "pass": "" },
-  "display": { "brightness": 128, "night": false, "timeout": 60 }
+  "display": { "brightness": 128, "night": false, "timeout": 60 },
+  "msg":     { "bg": 4226, "out_bubble": 1193, "in_bubble": 12678,
+               "out_text": 65535, "in_text": 65535, "route": "lora" }
 }
