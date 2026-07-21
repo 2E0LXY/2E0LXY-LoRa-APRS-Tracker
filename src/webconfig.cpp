@@ -92,6 +92,11 @@ static String buildPage() {
     h += "<div><label>Background</label><input name='c_bg' type='color' value='" + rgb565ToHex(Config.msg.bgColour) + "'></div></div>";
 
     // ── Display ──
+    // ── Bluetooth ──
+    h += F("<h2>Bluetooth (KISS TNC)</h2>");
+    h += "<label><input type='checkbox' name='ble_on' " + String(Config.device.bleEnabled ? "checked" : "") + "> Enable BLE KISS TNC (use tracker as a Bluetooth modem for phone apps)</label>";
+    h += F("<small>Leave OFF unless you use APRSdroid/YAAC over Bluetooth. Requires a reboot; uses extra memory.</small>");
+
     h += F("<h2>Display</h2>");
     h += "<label>Brightness (0-255)</label><input name='bright' type='number' min='0' max='255' value='" + String(Config.display.brightness) + "'>";
 
@@ -172,6 +177,7 @@ static void handleSave() {
     Config.wifi.password = arg("wifi_pass");
 
     Config.mqtt.active   = has("mqtt_on");
+    Config.device.bleEnabled = has("ble_on");
     Config.mqtt.username = arg("mqtt_user");
     Config.mqtt.password = arg("mqtt_pass");
 
