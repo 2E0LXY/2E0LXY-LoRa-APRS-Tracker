@@ -74,6 +74,31 @@ struct MsgConfig {
     String   defaultRoute    = "lora";
 };
 
+// ── Operating profiles (Walking / Car / Bicycle / Stationary) ────────────
+// Each profile carries its own symbol, SSID, comment and SmartBeacon timings.
+// The active profile is selected on-device or via WebUI.
+struct OpProfile {
+    String   name       = "Car";
+    int      ssid       = 9;
+    String   symbol     = "/>";      // car
+    String   comment    = "2E0LXY T-Deck";
+    bool     smart      = true;
+    int      slowRate   = 300;
+    int      fastRate   = 30;
+    int      speedThr   = 5;
+    int      turnAngle  = 30;
+    int      minDist    = 100;
+};
+
+// ── I2C Weather sensor (BME280) ──────────────────────────────────────────
+struct WeatherConfig {
+    bool    enabled     = false;     // auto-detected on I2C 0x76/0x77
+    bool    txWx        = false;     // transmit APRS WX beacons
+    int     wxInterval  = 600;       // seconds between WX beacons
+    float   tempOffset  = 0.0f;      // calibration
+    float   pressOffset = 0.0f;
+};
+
 // ── Region ───────────────────────────────────────────────────────────────
 struct RegionConfig {
     String  profileId       = "uk";     // matches a RegionalProfile id
@@ -91,6 +116,9 @@ struct Configuration {
     DisplayConfig display;
     MsgConfig     msg;
     RegionConfig  region;
+    WeatherConfig weather;
+    OpProfile     profiles[4];       // Walking / Car / Bicycle / Stationary
+    int           activeProfile = 1; // default: Car
     String        fwVersion = "1.2.0";
 };
 
@@ -102,3 +130,5 @@ void resetConfig();
 String  fullCallsign();   // e.g. "2E0LXY-9"
 int     calcPasscode(const String& call);
 bool    applyRegionProfile(const String& id);  // sets freq/sf/bw/cr/power/server/tz
+void    applyOpProfile(int idx);               // switch active operating profile
+void    initDefaultProfiles();                 // populate the 4 built-in profiles
