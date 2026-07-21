@@ -4,6 +4,7 @@
 #include "beacon_utils.h"
 #include "lora_utils.h"
 #include "aprs_utils.h"
+#include "ota_utils.h"
 #include "display_utils.h"
 #include "board_pins.h"
 #include <WiFi.h>
@@ -29,6 +30,7 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         if (cmd == "restart")  ESP.restart();
         if (cmd == "beacon")   Beacon_Utils::sendBeacon();
         if (cmd == "telemetry") MQTT_Utils::publishTelemetry();
+        if (cmd == "update")   OTA_Utils::checkAndUpdate(true);  // remote-triggered OTA
     }
 }
 
