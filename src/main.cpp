@@ -50,6 +50,7 @@ void onMessageReceived(const ParsedPacket& p) {
 void setup() {
     Serial.begin(115200);
     delay(200);
+    Serial.printf("\n[BOOT] Free heap: %u  PSRAM: %u\n", ESP.getFreeHeap(), ESP.getPsramSize());
     Serial.println("\n\n=== 2E0LXY LoRa APRS Tracker ===");
 
     // Power on peripheral rail
@@ -72,9 +73,14 @@ void setup() {
 
     // Weather sensor (auto-detect BME280 on I2C)
     Weather_Utils::setup();
+    Serial.printf("Heap after weather: %u\n", ESP.getFreeHeap());
 
-    // BLE KISS TNC (phone apps can use us as a Bluetooth modem)
-    BLE_KISS::begin();
+    // BLE KISS TNC — only if explicitly enabled (OFF by default; the BLE
+    // stack + WiFi + SPI at boot is memory-heavy and can prevent booting).
+    if (Config.device.bleEnabled) {
+        BLE_KISS::begin();
+        Serial.printf("Heap after BLE: %u\n", ESP.getFreeHeap());
+    }
 
     // LoRa
     if (!LoRa_Utils::setup()) {
@@ -130,7 +136,7 @@ void loop() {
     Weather_Utils::loop();
 
     // BLE KISS TNC
-    BLE_KISS::loop();
+    if (Config.device.bleEnabled) BLE_KISS::loop();
 
     // Web config portal (if running)
     WebConfig::loop();
@@ -144,7 +150,7 @@ void handleLoRaRx(const String& packet, float rssi, float snr) {
     Serial.printf("LoRa RX [%.0fdBm SNR%.1f]: %s\n", rssi, snr, packet.c_str());
 
     // Forward the raw frame to any BLE-connected phone (KISS TNC mode)
-    if (BLE_KISS::isConnected()) BLE_KISS::sendToPhone(packet);
+    if (Config.device.bleEnabled && BLE_KISS::isConnected()) BLE_KISS::sendToPhone(packet);
 
     ParsedPacket p = APRS_Utils::parsePacket(packet);
     p.rssi = rssi;
