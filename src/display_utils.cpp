@@ -11,6 +11,7 @@
 #include "keyboard_utils.h"
 #include "messaging.h"
 #include <algorithm>
+#include <vector>
 
 static TFT_eSPI tft = TFT_eSPI();
 static DisplayView currentView = VIEW_STATUS;
@@ -176,29 +177,70 @@ static void drawStationList() {
 }
 
 static void drawMessagesView() {
-    tft.fillRect(0, 20, TFT_WIDTH, TFT_HEIGHT - 20, C_BG);
+    tft.fillRect(0, 20, TFT_WIDTH, TFT_HEIGHT - 20, Config.msg.bgColour);
     tft.setTextSize(1);
 
-    // Message history — most recent 8, newest at bottom
+    // ── Chat bubbles (mirrors the website / Android app) ────────────────
+    // Outgoing = right-aligned, Config.msg.outBubble.
+    // Incoming = left-aligned,  Config.msg.inBubble.
     auto& hist = Messaging::history;
-    int shown = min((int)hist.size(), 8);
+    const int MAXW = 210;          // max bubble width in px
+    const int PAD  = 4;
+    const int CHARW = 6;           // approx width of size-1 font glyph
+    const int LINEH = 10;
     int y = 24;
+    int shown = min((int)hist.size(), 12);
+
     for (int i = (int)hist.size() - shown; i < (int)hist.size(); i++) {
+        if (i < 0) continue;
         auto& m = hist[i];
-        uint16_t col = m.outgoing ? C_GREEN : C_ACCENT;
-        tft.setTextColor(col, C_BG);
-        tft.setCursor(2, y);
-        String who = m.outgoing ? ("> " + m.to) : ("< " + m.from);
-        tft.print(who.substring(0, 12));
-        tft.setTextColor(C_WHITE, C_BG);
-        tft.setCursor(90, y);
-        tft.print(m.text.substring(0, 38));
-        y += 12;
+        String text = m.text;
+        // Word-wrap into lines that fit MAXW
+        int maxChars = (MAXW - 2 * PAD) / CHARW;
+        std::vector<String> wrapped;
+        String line = "";
+        for (int c = 0; c < (int)text.length(); c++) {
+            line += text[c];
+            if ((int)line.length() >= maxChars) { wrapped.push_back(line); line = ""; }
+        }
+        if (line.length()) wrapped.push_back(line);
+        if (wrapped.empty()) wrapped.push_back("");
+
+        int bubbleH = (int)wrapped.size() * LINEH + 2 * PAD;
+        int bubbleW = 0;
+        for (auto& l : wrapped) bubbleW = max(bubbleW, (int)l.length() * CHARW);
+        bubbleW += 2 * PAD;
+        if (bubbleW > MAXW) bubbleW = MAXW;
+
+        uint16_t bub = m.outgoing ? Config.msg.outBubble : Config.msg.inBubble;
+        uint16_t txt = m.outgoing ? Config.msg.outText   : Config.msg.inText;
+        int x = m.outgoing ? (TFT_WIDTH - bubbleW - 4) : 4;
+
+        // Bubble with rounded corners
+        tft.fillRoundRect(x, y, bubbleW, bubbleH, 4, bub);
+        // Sender label above bubble (tiny)
+        tft.setTextColor(C_GREY, Config.msg.bgColour);
+        tft.setCursor(x + 2, y - 9);
+        String who = m.outgoing ? ("me -> " + m.to) : m.from;
+        tft.print(who.substring(0, 20));
+        // Bubble text
+        tft.setTextColor(txt, bub);
+        int ty = y + PAD;
+        for (auto& l : wrapped) {
+            tft.setCursor(x + PAD, ty);
+            tft.print(l);
+            ty += LINEH;
+        }
+        y += bubbleH + 12;
+        if (y > TFT_HEIGHT - 40) break;   // don't overrun the compose bar
     }
+
     if (hist.empty()) {
-        tft.setTextColor(C_GREY, C_BG);
+        tft.setTextColor(C_GREY, Config.msg.bgColour);
         tft.setCursor(10, 60);
-        tft.print("No messages. Incoming messages set the reply target.");
+        tft.print("No messages yet.");
+        tft.setCursor(10, 74);
+        tft.print("Incoming messages set the reply target.");
     }
 
     // Compose bar at the bottom
