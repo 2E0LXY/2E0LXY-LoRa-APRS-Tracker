@@ -4,6 +4,8 @@
 #include "beacon_utils.h"
 #include "lora_utils.h"
 #include "aprs_utils.h"
+#include "display_utils.h"
+#include "board_pins.h"
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <PubSubClient.h>
@@ -59,7 +61,7 @@ bool MQTT_Utils::connect() {
 void MQTT_Utils::publishTelemetry() {
     if (!pubSub.connected()) return;
     StaticJsonDocument<256> doc;
-    doc["fw"]        = "1.0.0";
+    doc["fw"]        = FW_VERSION;
     doc["uptime"]    = millis() / 1000;
     doc["heap"]      = ESP.getFreeHeap();
     doc["gps_fix"]   = GPS_Utils::hasFix();
@@ -68,6 +70,8 @@ void MQTT_Utils::publishTelemetry() {
     doc["rx"]        = LoRa_Utils::getRxCount();
     doc["tx"]        = LoRa_Utils::getTxCount();
     doc["beacons"]   = Beacon_Utils::getCount();
+    doc["batt_v"]    = Display_Utils::batteryVolts();
+    doc["batt_pct"]  = Display_Utils::batteryPercent();
     if (GPS_Utils::hasFix()) {
         doc["lat"] = GPS_Utils::lat();
         doc["lon"] = GPS_Utils::lon();
