@@ -1,102 +1,96 @@
 # 2E0LXY LoRa APRS Tracker
 
-Standalone firmware for the **LilyGO T-Deck Plus** — a fully independent LoRa APRS field terminal with two-way messaging, live station tracking and [aprsnet.uk](https://www.aprsnet.uk/) integration.
+Standalone firmware for the **LilyGO T-Deck Plus** ESP32-S3 field terminal.
 
-![LilyGO T-Deck Plus](https://www.lilygo.cc/cdn/shop/files/T-DECK-PLUS.jpg)
-
-## Features
-
-| Feature | Status |
-|---|---|
-| SX1262 LoRa APRS TX/RX (UK 439.9125 MHz) | ✅ |
-| SmartBeaconing with corner-pegging | ✅ |
-| Two-way APRS messaging (keyboard input) | ✅ |
-| Live station list (LoRa RF + APRS-IS) | ✅ |
-| APRS-IS via WiFi (www.aprsnet.uk:14580) | ✅ |
-| aprsnet.uk MQTT telemetry + remote control | ✅ |
-| ST7789 TFT — status / stations / messages | ✅ |
-| L76K GPS — SmartBeacon position | ✅ |
-| MicroSD ready (offline map — Phase 2) | 🔲 |
-| OTA update from GitHub releases | ✅ |
+[![Build](https://github.com/2E0LXY/2E0LXY-LoRa-APRS-Tracker/actions/workflows/build.yml/badge.svg)](https://github.com/2E0LXY/2E0LXY-LoRa-APRS-Tracker/actions)
 
 ## Hardware
 
-**LilyGO T-Deck Plus** (ESP32-S3, 16MB Flash, 8MB PSRAM)
-- 2.8" ST7789 TFT 320×240
-- Blackberry-style keyboard (I2C 0x55)
-- Trackball (GPIO 1,2,3,15)
-- SX1262 LoRa (SPI)
-- L76K GPS (UART1: RX=44 TX=43)
-- MicroSD (SPI shared)
+| Component | Detail |
+|---|---|
+| Board | LilyGO T-Deck Plus (ESP32-S3, 16 MB Flash, 8 MB PSRAM) |
+| Radio | SX1262 LoRa |
+| Display | ST7789 2.8" TFT 320×240 |
+| Input | BlackBerry-style keyboard + trackball |
+| GPS | L76K (UART) |
+| Storage | MicroSD (map tiles, future) |
+| Battery | Internal LiPo, USB-C charging |
 
-## Quick start
+## Features
 
-### Flash pre-built binary
+- **UK LoRa APRS** — 439.9125 MHz, SF12, 125 kHz, CR 4/5
+- **SmartBeaconing** — speed/heading/distance adaptive, corner-pegging
+- **Two-way messaging** — compose and read APRS messages via the keyboard
+- **Station list** — live list of heard LoRa and APRS-IS stations with distance/bearing
+- **APRS-IS gateway** — connects to `www.aprsnet.uk:14580` via WiFi
+- **aprsnet.uk MQTT** — telemetry to the iGate management dashboard (port 1883)
+- **OTA updates** — checks GitHub releases every 6 hours; auto-installs over WiFi
+- **TFT display** — status view, station list, messages; 1-second refresh
+
+## Quick Start
+
+### Flash (pre-built)
+Download `2E0LXY-TDeck-Plus-firmware.bin` from [Releases](../../releases/latest) and flash:
 ```bash
 esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
   write_flash 0x0 2E0LXY-TDeck-Plus-firmware.bin
 ```
 
-Or use the [web installer](https://2e0lxy.github.io/2E0LXY-LoRa-APRS-Tracker/).
-
 ### Build from source
 ```bash
-git clone https://github.com/2E0LXY/2E0LXY-LoRa-APRS-Tracker.git
+git clone https://github.com/2E0LXY/2E0LXY-LoRa-APRS-Tracker
 cd 2E0LXY-LoRa-APRS-Tracker
 pio run -e t-deck-plus
-pio run -t uploadfs    # upload LittleFS (config.json)
+pio run -e t-deck-plus -t upload
 ```
 
-## First-time setup
+## Configuration
 
-On first boot the device loads default config from LittleFS.  
-Edit `data/config.json` before flashing, or connect to the WebUI after boot:
-
-1. Device creates WiFi AP `2E0LXY-Tracker` / `aprsnet123`
-2. Connect and browse to `192.168.4.1`
-3. Set callsign, WiFi credentials, MQTT credentials
-4. Save — device reboots with new settings
-
-## aprsnet.uk MQTT integration
-
-Once a member account exists at [aprsnet.uk](https://www.aprsnet.uk/), add credentials to `config.json`:
+Edit `/config.json` on the LittleFS partition **or** modify `include/configuration.h` defaults before building:
 
 ```json
-"mqtt": {
-  "active": true,
-  "server": "80.64.216.113",
-  "port": 1883,
-  "topic": "aprsnet",
-  "user": "YOUR_CALLSIGN",
-  "pass": "YOUR_MEMBER_PASSWORD"
+{
+  "aprs":   { "callsign": "2E0LXY", "ssid": 9, "comment": "T-Deck Plus" },
+  "lora":   { "freq": 439.9125, "sf": 12, "bw": 125, "cr": 5, "power": 17 },
+  "wifi":   { "ssid": "YourSSID", "password": "YourPass" },
+  "mqtt":   { "active": true, "server": "80.64.216.113", "port": 1883,
+              "topic": "aprsnet", "user": "2E0LXY", "pass": "member_password" },
+  "beacon": { "smart": true, "slow": 300, "fast": 30, "speed_th": 5, "turn": 30 }
 }
 ```
 
-The device then appears in **Member Settings → 📡 My LoRa APRS iGate Devices** with live telemetry and remote control (restart, force beacon, status).
-
-## Keyboard shortcuts
+## Keyboard Shortcuts
 
 | Key | Action |
 |---|---|
 | `1` | Status view |
-| `2` | Stations view |
+| `2` | Station list |
 | `3` | Messages view |
-| `B` | Force beacon now |
-| `Enter` (in messages) | Send composed message |
-| `Backspace` | Delete last character |
+| `B` | Force beacon |
+| `↵` (in messages) | Send composed message |
+| `⌫` | Backspace in compose |
 
-## Frequency (UK LoRa APRS)
+## aprsnet.uk Integration
 
-| Parameter | Value |
-|---|---|
-| Frequency | 439.9125 MHz |
-| Spreading Factor | SF12 |
-| Bandwidth | 125 kHz |
-| Coding Rate | 4/5 |
-| Preamble | 8 |
-| TX Power | 17 dBm (default) |
+When `mqtt.active = true`, the tracker appears in **Member Settings → 📡 My LoRa APRS iGate Devices** on [aprsnet.uk](https://www.aprsnet.uk) with:
+- Live telemetry (GPS fix, speed, sats, RX/TX counts, uptime, heap)
+- Remote **Restart** and **Force Beacon** commands
+
+**Note:** Use the direct VPS IP `80.64.216.113` for MQTT — `www.aprsnet.uk` passes through Cloudflare which does not proxy TCP port 1883.
+
+## Roadmap
+
+- [ ] Offline tile map from MicroSD (`.mbtiles`)
+- [ ] Live station plotting on map with trackball pan/zoom
+- [ ] WebUI config panel (WiFi AP mode on boot)
+- [ ] Weather APRS object (external BME280 via I2C)
+- [ ] GPX track recording to SD card
+- [ ] Winlink gateway
+
+## Related
+
+- [2E0LXY LoRa APRS iGate](https://github.com/2E0LXY/2E0LXY-LoRa-APRS-iGate) — fixed station iGate firmware
+- [APRS Net UK](https://www.aprsnet.uk) — live map, messaging, iGate management
 
 ## Licence
-
-Copyright © 2026 2E0LXY  
-GNU General Public License v3.0 — see [LICENSE](LICENSE)
+GNU GPL v3 — see [LICENSE](LICENSE)
