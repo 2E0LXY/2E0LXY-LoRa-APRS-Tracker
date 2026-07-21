@@ -31,6 +31,8 @@
 #include "messaging.h"
 #include "ota_utils.h"
 #include "webconfig.h"
+#include "weather_utils.h"
+#include "ble_kiss.h"
 
 // ── Forward declarations ──────────────────────────────────────────────────
 void handleKeyInput(char key);
@@ -67,6 +69,12 @@ void setup() {
 
     // Keyboard
     Keyboard_Utils::setup();
+
+    // Weather sensor (auto-detect BME280 on I2C)
+    Weather_Utils::setup();
+
+    // BLE KISS TNC (phone apps can use us as a Bluetooth modem)
+    BLE_KISS::begin();
 
     // LoRa
     if (!LoRa_Utils::setup()) {
@@ -118,6 +126,12 @@ void loop() {
     // Messaging
     Messaging::loop();
 
+    // Weather WX beacons
+    Weather_Utils::loop();
+
+    // BLE KISS TNC
+    BLE_KISS::loop();
+
     // Web config portal (if running)
     WebConfig::loop();
 
@@ -128,6 +142,9 @@ void loop() {
 // ── LoRa receive handler ──────────────────────────────────────────────────
 void handleLoRaRx(const String& packet, float rssi, float snr) {
     Serial.printf("LoRa RX [%.0fdBm SNR%.1f]: %s\n", rssi, snr, packet.c_str());
+
+    // Forward the raw frame to any BLE-connected phone (KISS TNC mode)
+    if (BLE_KISS::isConnected()) BLE_KISS::sendToPhone(packet);
 
     ParsedPacket p = APRS_Utils::parsePacket(packet);
     p.rssi = rssi;
@@ -241,6 +258,14 @@ void handleKeyInput(char key) {
     if (key == 'B' || key == 'b') {
         Beacon_Utils::sendBeacon();
         Display_Utils::showMessage("Beacon", "Manual beacon sent", TFT_GREEN);
+        return;
+    }
+    if (key == '5') {
+        // Cycle operating profile: Walking -> Car -> Bicycle -> Stationary
+        int next = (Config.activeProfile + 1) % 4;
+        applyOpProfile(next);
+        saveConfig();
+        Display_Utils::showMessage("Profile", "Now: " + Config.profiles[next].name, TFT_CYAN);
         return;
     }
 }
