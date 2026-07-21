@@ -112,6 +112,17 @@ static void drawStatusView() {
     tft.printf("Symbol: %s  Path: %s", Config.aprs.symbol.c_str(), Config.aprs.path.c_str());
     tft.setCursor(4, 92);
     tft.print(Config.aprs.comment);
+
+    // Region + TX status
+    tft.setCursor(4, 108);
+    tft.setTextColor(Config.region.txConfirmed ? C_GREEN : C_RED, C_BG);
+    tft.printf("Region: %s  TX:%s", Config.region.profileId.c_str(),
+        Config.region.txConfirmed ? "ON" : "OFF (disabled)");
+
+    // Key hints
+    tft.setTextColor(C_GREY, C_BG);
+    tft.setCursor(4, TFT_HEIGHT - 12);
+    tft.print("1:Status 2:Stations 3:Msgs 4:Setup(WiFi) B:Beacon");
 }
 
 static void drawStationList() {
