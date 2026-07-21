@@ -30,6 +30,7 @@
 #include "keyboard_utils.h"
 #include "messaging.h"
 #include "ota_utils.h"
+#include <TFT_eSPI.h>  // for TFT_RED / TFT_GREEN / TFT_CYAN
 
 // ── Forward declarations ──────────────────────────────────────────────────
 void handleKeyInput(char key);
@@ -139,7 +140,8 @@ void handleLoRaRx(const String& packet, float rssi, float snr) {
     }
 
     if (p.isMessage) {
-        if (p.toCall.trim() == fullCallsign()) {
+        p.toCall.trim();
+    if (p.toCall == fullCallsign()) {
             handleAPRSMessage(p.fromCall, p.text, p.msgID);
         }
     }
