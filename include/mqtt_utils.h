@@ -6,4 +6,5 @@ namespace MQTT_Utils {
     void loop();
     void publishTelemetry();
     bool isConnected();
+    bool publishMessage(const String& to, const String& text);
 }
