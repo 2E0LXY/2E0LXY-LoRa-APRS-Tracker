@@ -5,6 +5,7 @@
 #include "lora_utils.h"
 #include "aprs_utils.h"
 #include "ota_utils.h"
+#include "messaging.h"
 #include "display_utils.h"
 #include "board_pins.h"
 #include <WiFi.h>
@@ -22,8 +23,24 @@ static String baseTopic() {
 
 static void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     String t(topic), p((char*)payload, length);
-    Serial.println("MQTT CMD: " + t + " → " + p);
 
+    // Incoming message via server route: aprsnet/{owner}/{device}/inbox
+    if (t.endsWith("/inbox")) {
+        StaticJsonDocument<512> doc;
+        if (deserializeJson(doc, p) == DeserializationError::Ok) {
+            String from = doc["from"] | "";
+            String text = doc["text"] | "";
+            if (from.length() && text.length()) {
+                Serial.println("MQTT inbox: " + from + " -> " + text);
+                Messaging::receive(from, text, "");   // no msgID for server-route msgs
+                Display_Utils::showMessage("MSG (server): " + from, text, TFT_CYAN);
+            }
+        }
+        return;
+    }
+
+    // Commands: aprsnet/{owner}/{device}/cmd
+    Serial.println("MQTT CMD: " + t + " → " + p);
     StaticJsonDocument<256> doc;
     if (deserializeJson(doc, p) == DeserializationError::Ok) {
         String cmd = doc["cmd"] | "";
@@ -54,6 +71,8 @@ bool MQTT_Utils::connect() {
     if (ok) {
         String cmdTopic = baseTopic() + "/cmd";
         pubSub.subscribe(cmdTopic.c_str());
+        String inboxTopic = baseTopic() + "/inbox";
+        pubSub.subscribe(inboxTopic.c_str());
         publishTelemetry();
         Serial.println("MQTT: connected to " + Config.mqtt.server);
     }
