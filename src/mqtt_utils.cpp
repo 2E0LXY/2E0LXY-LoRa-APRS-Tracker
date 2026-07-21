@@ -84,6 +84,20 @@ void MQTT_Utils::publishTelemetry() {
     pubSub.publish((baseTopic() + "/telemetry").c_str(), buf);
 }
 
+// Send a message to another station via the aprsnet.uk server (store-and-forward).
+// Publishes to aprsnet/{owner}/{device}/message — the server delivers it exactly
+// like the website's "direct" route, no RF needed. Returns false if not connected.
+bool MQTT_Utils::publishMessage(const String& to, const String& text) {
+    if (!pubSub.connected()) return false;
+    StaticJsonDocument<256> doc;
+    doc["to"]   = to;
+    doc["text"] = text;
+    char buf[256];
+    size_t n = serializeJson(doc, buf);
+    String topic = baseTopic() + "/message";
+    return pubSub.publish(topic.c_str(), (const uint8_t*)buf, n, false);
+}
+
 void MQTT_Utils::loop() {
     if (!Config.mqtt.active) return;
     if (!pubSub.connected()) { connect(); return; }
