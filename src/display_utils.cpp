@@ -8,10 +8,14 @@
 #include "mqtt_utils.h"
 #include <TFT_eSPI.h>
 #include <WiFi.h>
+#include "keyboard_utils.h"
+#include "messaging.h"
+#include <algorithm>
 
 static TFT_eSPI tft = TFT_eSPI();
 static DisplayView currentView = VIEW_STATUS;
 static uint32_t lastRedrawMs = 0;
+static uint32_t overlayUntilMs = 0;   // suppress redraw while an overlay message is showing
 
 // ── Colour palette ───────────────────────────────────────────────────────
 #define C_BG        0x1082   // near-black
@@ -61,11 +65,11 @@ static void drawStatusBar() {
     tft.setCursor(240, 6);
     tft.printf("Rx:%d", (int)APRS_Utils::heardStations.size());
 
-    // Speed
-    if (GPS_Utils::hasFix()) {
-        tft.setCursor(290, 6);
-        tft.printf("%.0f", GPS_Utils::speedKph());
-    }
+    // Battery
+    int pct = Display_Utils::batteryPercent();
+    tft.setTextColor(pct > 30 ? C_GREEN : (pct > 15 ? C_AMBER : C_RED), C_STATUS);
+    tft.setCursor(290, 6);
+    tft.printf("%d%%", pct);
 }
 
 static void drawStatusView() {
@@ -171,6 +175,61 @@ static void drawStationList() {
     }
 }
 
+static void drawMessagesView() {
+    tft.fillRect(0, 20, TFT_WIDTH, TFT_HEIGHT - 20, C_BG);
+    tft.setTextSize(1);
+
+    // Message history — most recent 8, newest at bottom
+    auto& hist = Messaging::history;
+    int shown = min((int)hist.size(), 8);
+    int y = 24;
+    for (int i = (int)hist.size() - shown; i < (int)hist.size(); i++) {
+        auto& m = hist[i];
+        uint16_t col = m.outgoing ? C_GREEN : C_ACCENT;
+        tft.setTextColor(col, C_BG);
+        tft.setCursor(2, y);
+        String who = m.outgoing ? ("> " + m.to) : ("< " + m.from);
+        tft.print(who.substring(0, 12));
+        tft.setTextColor(C_WHITE, C_BG);
+        tft.setCursor(90, y);
+        tft.print(m.text.substring(0, 38));
+        y += 12;
+    }
+    if (hist.empty()) {
+        tft.setTextColor(C_GREY, C_BG);
+        tft.setCursor(10, 60);
+        tft.print("No messages. Incoming messages set the reply target.");
+    }
+
+    // Compose bar at the bottom
+    tft.fillRect(0, TFT_HEIGHT - 34, TFT_WIDTH, 34, 0x2104);
+    tft.drawFastHLine(0, TFT_HEIGHT - 34, TFT_WIDTH, C_ACCENT);
+    tft.setTextColor(C_AMBER, 0x2104);
+    tft.setCursor(2, TFT_HEIGHT - 28);
+    String target = Messaging::getReplyTarget();
+    tft.print("To: " + (target.length() ? target : String("(none)")));
+    tft.setTextColor(C_WHITE, 0x2104);
+    tft.setCursor(2, TFT_HEIGHT - 14);
+    String buf = Keyboard_Utils::getBuffer();
+    // Show tail of buffer with cursor
+    String view = buf.length() > 50 ? buf.substring(buf.length() - 50) : buf;
+    tft.print(view + "_");
+}
+
+// ── Battery ───────────────────────────────────────────────────────────────
+float Display_Utils::batteryVolts() {
+    // Divider halves the LiPo voltage into the ADC
+    uint32_t mv = analogReadMilliVolts(BOARD_BAT_ADC) * 2;
+    return mv / 1000.0f;
+}
+
+int Display_Utils::batteryPercent() {
+    float v = batteryVolts() * 1000;
+    if (v <= BAT_EMPTY_MV) return 0;
+    if (v >= BAT_FULL_MV)  return 100;
+    return (int)((v - BAT_EMPTY_MV) * 100.0f / (BAT_FULL_MV - BAT_EMPTY_MV));
+}
+
 // ── Public API ────────────────────────────────────────────────────────────
 
 void Display_Utils::setup() {
@@ -192,12 +251,14 @@ void Display_Utils::setup() {
 }
 
 void Display_Utils::loop() {
+    if (millis() < overlayUntilMs) return;         // hold overlay on screen
     if (millis() - lastRedrawMs < 1000) return;
     lastRedrawMs = millis();
     drawStatusBar();
     switch (currentView) {
         case VIEW_STATUS:   drawStatusView();   break;
         case VIEW_STATIONS: drawStationList();  break;
+        case VIEW_MESSAGES: drawMessagesView(); break;
         default: break;
     }
 }
@@ -207,6 +268,7 @@ DisplayView Display_Utils::getView()         { return currentView; }
 void Display_Utils::setBrightness(int v)     { ledcWrite(0, v); }
 
 void Display_Utils::showMessage(const String& title, const String& body, uint16_t colour) {
+    overlayUntilMs = millis() + 4000;   // keep visible for 4 s
     tft.fillRect(20, 80, 280, 80, 0x1104);
     tft.drawRect(20, 80, 280, 80, colour);
     tft.setTextColor(colour, 0x1104);
