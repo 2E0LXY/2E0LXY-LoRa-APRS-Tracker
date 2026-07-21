@@ -139,7 +139,8 @@ void handleLoRaRx(const String& packet, float rssi, float snr) {
     }
 
     if (p.isMessage) {
-        if (p.toCall.trim() == fullCallsign()) {
+        String _tc = p.toCall; _tc.trim();
+        if (_tc == fullCallsign()) {
             handleAPRSMessage(p.fromCall, p.text, p.msgID);
         }
     }
