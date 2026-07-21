@@ -133,9 +133,14 @@ void handleLoRaRx(const String& packet, float rssi, float snr) {
         APRS_Utils::updateStation(p.fromCall, p);
     }
 
-    // Gate LoRa to APRS-IS
+    // Gate LoRa to APRS-IS with proper qAO construct (receive-only iGate)
     if (p.valid && Config.beacon.aprsIsEnabled && APRS_Utils::isConnected()) {
-        APRS_Utils::sendPacketIS(packet);
+        int ci = packet.indexOf(':');
+        if (ci > 0) {
+            String gated = packet.substring(0, ci) + ",qAO," + fullCallsign()
+                         + packet.substring(ci);
+            APRS_Utils::sendPacketIS(gated);
+        }
     }
 
     if (p.isMessage) {
@@ -152,42 +157,52 @@ void handleAPRSMessage(const String& from, const String& text, const String& msg
     Messaging::receive(from, text, msgID);
     Display_Utils::showMessage("MSG: " + from, text, TFT_CYAN);
 
-    // Send ACK
-    String ack = APRS_Utils::buildAckPacket(from, msgID);
-    if (Config.beacon.loraEnabled)   LoRa_Utils::sendPacket(ack);
-    if (APRS_Utils::isConnected())   APRS_Utils::sendPacketIS(ack);
+    // Send ACK only if the message carried an {ID} (per APRS spec)
+    if (msgID.length() > 0) {
+        String ack = APRS_Utils::buildAckPacket(from, msgID);
+        if (Config.beacon.loraEnabled)   LoRa_Utils::sendPacket(ack);
+        if (APRS_Utils::isConnected())   APRS_Utils::sendPacketIS(ack);
+    }
 }
 
 // ── Keyboard navigation & input ───────────────────────────────────────────
 void handleKeyInput(char key) {
-    // View switching
-    if (key == '1') { Display_Utils::setView(VIEW_STATUS);   return; }
-    if (key == '2') { Display_Utils::setView(VIEW_STATIONS); return; }
-    if (key == '3') { Display_Utils::setView(VIEW_MESSAGES); return; }
+    bool inMessages = (Display_Utils::getView() == VIEW_MESSAGES);
 
-    // Manual beacon
-    if (key == 'B' || key == 'b') {
-        Beacon_Utils::sendBeacon();
-        Display_Utils::showMessage("Beacon", "Manual beacon sent", TFT_GREEN);
-        return;
-    }
-
-    // In message compose mode
-    if (Display_Utils::getView() == VIEW_MESSAGES) {
+    // ── Compose mode: printable characters go to the buffer FIRST so
+    //    digits and 'b' are typable inside a message ─────────────────────
+    if (inMessages) {
         if (key == '\r' || key == '\n') {
-            // Send the composed message
             String buf = Keyboard_Utils::getBuffer();
             String dest = Messaging::getReplyTarget();
-            if (buf.length() > 0 && dest.length() > 0) {
+            if (buf.length() == 0) {
+                // Enter on empty buffer exits messages view
+                Display_Utils::setView(VIEW_STATUS);
+                return;
+            }
+            if (dest.length() > 0) {
                 String pkt = APRS_Utils::buildMessagePacket(dest, buf, Messaging::nextMsgID());
                 if (Config.beacon.loraEnabled)  LoRa_Utils::sendPacket(pkt);
                 if (APRS_Utils::isConnected())  APRS_Utils::sendPacketIS(pkt);
                 Messaging::markSent(dest, buf);
                 Keyboard_Utils::clearBuffer();
-                Display_Utils::showMessage("Sent", "→ " + dest, TFT_GREEN);
+                Display_Utils::showMessage("Sent", "-> " + dest, TFT_GREEN);
+            } else {
+                Display_Utils::showMessage("No target", "Reply target not set - wait for a message first", TFT_ORANGE);
             }
         } else {
             Keyboard_Utils::appendToBuffer(key);
         }
+        return;
+    }
+
+    // ── Navigation (outside messages view) ──────────────────────────────
+    if (key == '1') { Display_Utils::setView(VIEW_STATUS);   return; }
+    if (key == '2') { Display_Utils::setView(VIEW_STATIONS); return; }
+    if (key == '3') { Display_Utils::setView(VIEW_MESSAGES); return; }
+    if (key == 'B' || key == 'b') {
+        Beacon_Utils::sendBeacon();
+        Display_Utils::showMessage("Beacon", "Manual beacon sent", TFT_GREEN);
+        return;
     }
 }
