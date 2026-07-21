@@ -18,14 +18,19 @@ StationList APRS_Utils::heardStations;
 String APRS_Utils::buildPositionPacket() {
     // !DDmm.hhN/DDDmm.hhE[sym][comment]
     char spd[8], cse[8];
-    snprintf(spd, sizeof(spd), "%03d", (int)GPS_Utils::speedKph());
-    snprintf(cse, sizeof(cse), "%03d", (int)GPS_Utils::courseDeg());
+    // APRS spec: speed field is KNOTS, course 001-360 (000 = unknown)
+    int knots  = (int)(GPS_Utils::speedKph() / 1.852f);
+    int course = (int)GPS_Utils::courseDeg();
+    if (course == 0) course = 360;   // 0 means "unknown" per spec
+    snprintf(spd, sizeof(spd), "%03d", knots);
+    snprintf(cse, sizeof(cse), "%03d", course);
 
+    String sym = Config.aprs.symbol.length() >= 2 ? Config.aprs.symbol : "/>";
     String packet = fullCallsign() + ">APLT00," + Config.aprs.path + ":!"
         + GPS_Utils::aprsLat(GPS_Utils::lat())
-        + Config.aprs.symbol[0]
+        + sym[0]
         + GPS_Utils::aprsLon(GPS_Utils::lon())
-        + Config.aprs.symbol[1]
+        + sym[1]
         + String(cse) + "/" + String(spd);
 
     if (GPS_Utils::altM() > 0) {
@@ -95,7 +100,10 @@ ParsedPacket APRS_Utils::parsePacket(const String& raw) {
             char lonHemi = lonStr[8];
             p.lon = lonDeg + lonMin / 60.0f;
             if (lonHemi == 'W') p.lon = -p.lon;
-            p.hasPosition = (p.lat != 0 || p.lon != 0);
+            // Sanity: reject out-of-range coordinates from malformed packets
+            p.hasPosition = (p.lat != 0 || p.lon != 0)
+                          && p.lat >= -90.0f && p.lat <= 90.0f
+                          && p.lon >= -180.0f && p.lon <= 180.0f;
 
             // Comment (everything after symbol)
             p.comment = info.substring(pos + 19);
@@ -130,10 +138,11 @@ void APRS_Utils::connect() {
         Serial.println("APRS-IS: connection failed");
         return;
     }
+    aprsClient.setTimeout(50);  // never block the main loop on partial lines
     // Login
     String login = "user " + fullCallsign()
         + " pass " + String(Config.aprs.passcode)
-        + " vers 2E0LXY-Tracker 1.0.0"
+        + " vers 2E0LXY-Tracker " FW_VERSION
         + " filter m/50\r\n";
     aprsClient.print(login);
     aprsConnected = true;
