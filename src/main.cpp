@@ -30,6 +30,7 @@
 #include "keyboard_utils.h"
 #include "messaging.h"
 #include "ota_utils.h"
+#include "webconfig.h"
 
 // ── Forward declarations ──────────────────────────────────────────────────
 void handleKeyInput(char key);
@@ -116,6 +117,9 @@ void loop() {
 
     // Messaging
     Messaging::loop();
+
+    // Web config portal (if running)
+    WebConfig::loop();
 
     // OTA check (every 6 hours)
     OTA_Utils::loop();
@@ -222,6 +226,18 @@ void handleKeyInput(char key) {
     if (key == '1') { Display_Utils::setView(VIEW_STATUS);   return; }
     if (key == '2') { Display_Utils::setView(VIEW_STATIONS); return; }
     if (key == '3') { Display_Utils::setView(VIEW_MESSAGES); return; }
+    if (key == '4') {
+        // Launch WiFi settings portal
+        if (!WebConfig::isRunning()) {
+            WebConfig::begin();
+            Display_Utils::showMessage("Setup Portal",
+                "Join WiFi '2E0LXY-Tracker-Setup' then browse to 192.168.4.1", TFT_CYAN);
+        } else {
+            WebConfig::stop();
+            Display_Utils::showMessage("Setup Portal", "Stopped", TFT_ORANGE);
+        }
+        return;
+    }
     if (key == 'B' || key == 'b') {
         Beacon_Utils::sendBeacon();
         Display_Utils::showMessage("Beacon", "Manual beacon sent", TFT_GREEN);
