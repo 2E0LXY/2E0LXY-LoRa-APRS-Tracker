@@ -31,6 +31,7 @@
 #include "messaging.h"
 #include "ota_utils.h"
 #include "webconfig.h"
+#include "usb_msc.h"
 #include "weather_utils.h"
 #include "ble_kiss.h"
 
@@ -101,6 +102,10 @@ void setup() {
 
 // ── Main loop ─────────────────────────────────────────────────────────────
 void loop() {
+    // While the SD card is presented over USB, the tracker is paused — the
+    // host owns the card/bus. Only service USB until reboot.
+    if (USB_MSC::isActive()) { delay(50); return; }
+
     // GPS NMEA
     GPS_Utils::loop();
 
@@ -272,6 +277,19 @@ void handleKeyInput(char key) {
         applyOpProfile(next);
         saveConfig();
         Display_Utils::showMessage("Profile", "Now: " + Config.profiles[next].name, TFT_CYAN);
+        return;
+    }
+    if (key == '6') {
+        // USB Mass Storage mode — present the SD card to a host computer so the
+        // aprsnet.uk Map Downloader can write tiles straight onto it. This takes
+        // over the SD/SPI bus, so we show a dedicated screen and block until the
+        // device is rebooted (host should eject first).
+        Display_Utils::drawUsbMscScreen("Starting USB drive mode...");
+        if (USB_MSC::begin()) {
+            Display_Utils::drawUsbMscScreen("SD card is now a USB drive.\n\nWrite your maps from a computer,\neject it, then press RESET to\nreturn to tracker mode.");
+        } else {
+            Display_Utils::showMessage("USB Drive", "No SD card found - insert a card and try again", TFT_RED);
+        }
         return;
     }
 }
