@@ -7,6 +7,8 @@
 #include "lora_utils.h"
 #include "mqtt_utils.h"
 #include <TFT_eSPI.h>
+#include <TJpg_Decoder.h>
+#include "boot_splash.h"
 #include <WiFi.h>
 #include "keyboard_utils.h"
 #include "messaging.h"
@@ -285,22 +287,43 @@ int Display_Utils::batteryPercent() {
 
 // ── Public API ────────────────────────────────────────────────────────────
 
+// TJpg_Decoder output callback — pushes each decoded MCU block to the TFT.
+static bool tftJpgOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+    if (y >= tft.height()) return false;
+    tft.pushImage(x, y, w, h, bitmap);
+    return true;
+}
+
 void Display_Utils::setup() {
     tft.init();
     tft.setRotation(1);  // landscape
-    tft.fillScreen(C_BG);
+    tft.fillScreen(TFT_BLACK);
     ledcSetup(0, 5000, 8);
     ledcAttachPin(BOARD_TFT_BL, 0);
     ledcWrite(0, Config.display.brightness);
-    tft.setCursor(80, 110);
-    tft.setTextColor(C_ACCENT);
-    tft.setTextSize(2);
-    tft.println("2E0LXY Tracker");
-    tft.setTextSize(1);
-    tft.setTextColor(C_WHITE);
-    tft.setCursor(100, 130);
-    tft.println("LoRa APRS T-Deck Plus");
-    delay(1500);
+
+    // ── Boot splash: decode the embedded APRS BOOT JPEG ──────────────────
+    TJpgDec.setJpgScale(1);
+    TJpgDec.setSwapBytes(true);
+    TJpgDec.setCallback(tftJpgOutput);
+    uint16_t jw = 0, jh = 0;
+    TJpgDec.getJpgSize(&jw, &jh, BOOT_SPLASH_JPG, BOOT_SPLASH_LEN);
+    // Centre if not exactly full-screen
+    int16_t ox = (jw && jw < 320) ? (320 - jw) / 2 : 0;
+    int16_t oy = (jh && jh < 240) ? (240 - jh) / 2 : 0;
+    if (TJpgDec.drawJpg(ox, oy, BOOT_SPLASH_JPG, BOOT_SPLASH_LEN) != 0) {
+        // Fallback to text splash if decode fails
+        tft.fillScreen(C_BG);
+        tft.setCursor(70, 100);
+        tft.setTextColor(C_ACCENT);
+        tft.setTextSize(2);
+        tft.println("APRS BOOT");
+        tft.setTextSize(1);
+        tft.setTextColor(C_WHITE);
+        tft.setCursor(70, 130);
+        tft.println("LoRa APRS Edition - aprsnet.uk");
+    }
+    delay(2500);   // hold the splash so it's readable
 }
 
 void Display_Utils::loop() {
