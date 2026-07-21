@@ -58,6 +58,22 @@ struct DisplayConfig {
     int     timeout     = 60;       // seconds before dim; 0 = always on
 };
 
+// ── Messaging / theme ────────────────────────────────────────────────────
+struct MsgConfig {
+    // Colours are RGB565 (16-bit) to match the ST7789 TFT.
+    // Defaults chosen to mirror the website / Android app palette.
+    uint16_t bgColour        = 0x1082;   // near-black background
+    uint16_t outBubble       = 0x04A9;   // teal-ish (sent, right)
+    uint16_t inBubble        = 0x3186;   // slate-grey (received, left)
+    uint16_t outText         = 0xFFFF;   // white
+    uint16_t inText          = 0xFFFF;   // white
+    // Preferred send route when both are available:
+    //   "lora"   — RF only
+    //   "aprsis" — APRS-IS over WiFi/TCP
+    //   "server" — aprsnet.uk store-and-forward via MQTT (no RF)
+    String   defaultRoute    = "lora";
+};
+
 // ── Root config ──────────────────────────────────────────────────────────
 struct Configuration {
     APRSConfig    aprs;
@@ -66,7 +82,8 @@ struct Configuration {
     WiFiConfig    wifi;
     MQTTConfig    mqtt;
     DisplayConfig display;
-    String        fwVersion = "1.0.0";
+    MsgConfig     msg;
+    String        fwVersion = "1.1.0";
 };
 
 extern Configuration Config;
