@@ -29,7 +29,7 @@ static String buildPage() {
         ".warn{background:#7f1d1d;color:#fecaca;padding:8px;border-radius:6px;font-size:12px;margin:8px 0}"
         ".ok{background:#064e3b;color:#a7f3d0;padding:8px;border-radius:6px;font-size:12px;margin:8px 0}"
         "small{color:#64748b;font-size:11px}"
-        "</style></head><body><h1>&#128225; 2E0LXY Tracker Setup</h1>"
+        "</style></head><body><h1>&#128225; 2E0LXY Tracker Setup <span style='font-size:11px;color:#64748b'>fw " + String(FW_VERSION) + "</span></h1>"
         "<form method='POST' action='/save'>");
 
     // ── Identity ──
