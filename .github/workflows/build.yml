@@ -41,11 +41,29 @@ jobs:
       - name: Build firmware
         run: pio run -e t-deck-plus
 
-      - name: Rename binary
+      - name: Create full-flash image (bootloader + partitions + app)
+        shell: bash
         run: |
+          set -euo pipefail
+          BUILD=".pio/build/t-deck-plus"
+          FRAMEWORK="$HOME/.platformio/packages/framework-arduinoespressif32"
+          ESPTOOL="$HOME/.platformio/packages/tool-esptoolpy/esptool.py"
           mkdir -p dist
-          cp .pio/build/t-deck-plus/firmware.bin dist/2E0LXY-TDeck-Plus-firmware.bin
-          cp .pio/build/t-deck-plus/firmware.elf dist/2E0LXY-TDeck-Plus-firmware.elf 2>/dev/null || true
+          cp "$BUILD/firmware.bin" dist/2E0LXY-TDeck-Plus-firmware.bin
+          cp "$BUILD/firmware.elf" dist/2E0LXY-TDeck-Plus-firmware.elf 2>/dev/null || true
+          # T-Deck Plus = ESP32-S3, 16MB flash, bootloader at 0x0 (no 0x1000
+          # offset - that's only for classic ESP32). This merged image can be
+          # safely written starting at 0x0 with a full chip erase, unlike the
+          # app-only firmware.bin above which REQUIRES an existing bootloader.
+          python "$ESPTOOL" --chip esp32s3 merge_bin \
+            -o dist/2E0LXY-TDeck-Plus-full-flash.bin \
+            --flash_mode qio \
+            --flash_freq 80m \
+            --flash_size 16MB \
+            0x0000  "$BUILD/bootloader.bin" \
+            0x8000  "$BUILD/partitions.bin" \
+            0xe000  "$FRAMEWORK/tools/partitions/boot_app0.bin" \
+            0x10000 "$BUILD/firmware.bin"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
