@@ -29,6 +29,15 @@ jobs:
           path: ~/.platformio
           key: pio-${{ hashFiles('platformio.ini') }}
 
+      - name: Stamp FW_VERSION from git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${{ github.ref_name }}"
+          VER="${TAG#v}"
+          sed -i "s/#define FW_VERSION \".*\"/#define FW_VERSION \"${VER}\"/" include/board_pins.h
+          echo "Stamped FW_VERSION=${VER}"
+          grep FW_VERSION include/board_pins.h
+
       - name: Build firmware
         run: pio run -e t-deck-plus
 
