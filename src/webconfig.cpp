@@ -1,4 +1,5 @@
 #include "webconfig.h"
+#include "board_pins.h"
 #include "configuration.h"
 #include "regional.h"
 #include "beacon_utils.h"
