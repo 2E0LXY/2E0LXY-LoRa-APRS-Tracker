@@ -139,10 +139,12 @@ void APRS_Utils::connect() {
         return;
     }
     aprsClient.setTimeout(50);  // never block the main loop on partial lines
-    // Login
+    // Login — "vers" identifies this client in aprsnet.uk's connected-clients
+    // list (SOFTWARE column), matching the existing "APRSNET Desktop" /
+    // "APRSNetAndroid 2.0" naming convention.
     String login = "user " + fullCallsign()
         + " pass " + String(Config.aprs.passcode)
-        + " vers 2E0LXY-Tracker " FW_VERSION
+        + " vers APRSNet-T-Deck " FW_VERSION
         + " filter m/50\r\n";
     aprsClient.print(login);
     aprsConnected = true;

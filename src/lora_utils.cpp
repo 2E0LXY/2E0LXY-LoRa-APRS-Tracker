@@ -2,8 +2,17 @@
 #include "board_pins.h"
 #include "configuration.h"
 #include <RadioLib.h>
+#include <TFT_eSPI.h>
 
-static SX1262 radio = new Module(LORA_CS, LORA_IRQ, LORA_RST, LORA_BUSY);
+// Shares the physical SPI bus with the display. TFT_eSPI (built with
+// USE_HSPI_PORT for this ESP32-S3 core) owns and initialises its own
+// SPIClass instance for the bus (SCK/MOSI/MISO are wired to TFT+SD+LoRa
+// together). Handing RadioLib that same instance — instead of letting it
+// default to the global SPI object, which is a second, separate
+// peripheral on this chip — avoids the two drivers fighting over the
+// shared pins' IO-MUX, which was leaving the display frozen after the
+// boot splash once LoRa init ran.
+static SX1262 radio = new Module(LORA_CS, LORA_IRQ, LORA_RST, LORA_BUSY, TFT_eSPI::getSPIinstance());
 static volatile bool rxFlag = false;
 static String lastRxPacket;
 static float  lastRxRSSI = 0, lastRxSNR = 0;

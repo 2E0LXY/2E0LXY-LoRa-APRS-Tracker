@@ -104,6 +104,12 @@ struct DeviceConfig {
     bool bleEnabled = false;   // BLE KISS TNC — OFF by default (saves RAM at boot)
 };
 
+// ── Audio (message-received notification tone) ──────────────────────────
+struct AudioConfig {
+    bool    enabled = true;
+    int     volume  = 70;      // 0-100
+};
+
 // ── Region ───────────────────────────────────────────────────────────────
 struct RegionConfig {
     String  profileId       = "uk";     // matches a RegionalProfile id
@@ -123,6 +129,7 @@ struct Configuration {
     RegionConfig  region;
     WeatherConfig weather;
     DeviceConfig  device;
+    AudioConfig   audio;
     OpProfile     profiles[4];       // Walking / Car / Bicycle / Stationary
     int           activeProfile = 1; // default: Car
     String        fwVersion = "1.2.0";

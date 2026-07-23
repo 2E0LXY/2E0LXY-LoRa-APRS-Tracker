@@ -74,5 +74,13 @@
 #define MQTT_TOPIC_BASE     "aprsnet"
 
 // ── Display ──────────────────────────────────────────────────────────────
-#define TFT_WIDTH           320
-#define TFT_HEIGHT          240
+// NOTE: named SCREEN_* (not TFT_WIDTH/TFT_HEIGHT) — those macro names are
+// owned by TFT_eSPI itself (set via platformio.ini build_flags as the
+// panel's native portrait size, 240x320) and get resolved/rotated
+// internally by the library. Reusing the same names here for the app's
+// post-rotation landscape size collided with TFT_eSPI's own definition
+// depending on header include order, leaving tft.width()/height() stuck
+// at the un-rotated portrait values (240x320 instead of 320x240) and
+// causing the app to draw UI past the addressable screen area.
+#define SCREEN_WIDTH         320
+#define SCREEN_HEIGHT        240

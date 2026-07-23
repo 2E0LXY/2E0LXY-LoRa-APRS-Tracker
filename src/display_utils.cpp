@@ -16,7 +16,7 @@
 #include <vector>
 
 static TFT_eSPI tft = TFT_eSPI();
-static DisplayView currentView = VIEW_STATUS;
+static DisplayView currentView = VIEW_STATIONS;   // home screen: callsigns heard
 static uint32_t lastRedrawMs = 0;
 static uint32_t overlayUntilMs = 0;   // suppress redraw while an overlay message is showing
 
@@ -33,7 +33,7 @@ static uint32_t overlayUntilMs = 0;   // suppress redraw while an overlay messag
 
 static void drawStatusBar() {
     // Top 20px status bar
-    tft.fillRect(0, 0, TFT_WIDTH, 20, C_STATUS);
+    tft.fillRect(0, 0, SCREEN_WIDTH, 20, C_STATUS);
     tft.setTextColor(C_WHITE, C_STATUS);
     tft.setTextSize(1);
 
@@ -74,9 +74,8 @@ static void drawStatusBar() {
     tft.setCursor(290, 6);
     tft.printf("%d%%", pct);
 }
-
 static void drawStatusView() {
-    tft.fillRect(0, 20, TFT_WIDTH, TFT_HEIGHT - 20, C_BG);
+    tft.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
     tft.setTextColor(C_WHITE, C_BG);
 
     // Position
@@ -95,7 +94,7 @@ static void drawStatusView() {
     }
 
     // Divider
-    tft.drawFastHLine(0, 52, TFT_WIDTH, C_GREY);
+    tft.drawFastHLine(0, 52, SCREEN_WIDTH, C_GREY);
 
     // Last beacon
     tft.setTextColor(C_GREEN, C_BG);
@@ -123,12 +122,11 @@ static void drawStatusView() {
 
     // Key hints
     tft.setTextColor(C_GREY, C_BG);
-    tft.setCursor(4, TFT_HEIGHT - 12);
-    tft.print("1:Sts 2:Stn 3:Msg 4:WiFi 5:Prof 6:USB B:Bcn");
+    tft.setCursor(4, SCREEN_HEIGHT - 12);
+    tft.print("S:Sts T:Stn M:Msg W:WiFi P:Prof U:USB B:Bcn");
 }
-
 static void drawStationList() {
-    tft.fillRect(0, 20, TFT_WIDTH, TFT_HEIGHT - 20, C_BG);
+    tft.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
     tft.setTextSize(1);
 
     auto& stations = APRS_Utils::heardStations;
@@ -136,6 +134,8 @@ static void drawStationList() {
         tft.setTextColor(C_GREY, C_BG);
         tft.setCursor(10, 60);
         tft.print("No stations heard yet.");
+        tft.setCursor(4, SCREEN_HEIGHT - 12);
+        tft.print("Home  |  S:Sts M:Msg W:WiFi P:Prof U:USB B:Bcn");
         return;
     }
 
@@ -145,19 +145,18 @@ static void drawStationList() {
         return a.lastHeardMs > b.lastHeardMs;
     });
 
-    int maxRows = (TFT_HEIGHT - 22) / 18;
+    int maxRows = (SCREEN_HEIGHT - 22 - 12) / 18;   // reserve 12px for the footer hint
     for (int i = 0; i < min((int)sorted.size(), maxRows); i++) {
         auto& s = sorted[i];
         int y = 22 + i * 18;
 
         // Row background alternating
-        tft.fillRect(0, y, TFT_WIDTH, 17, (i % 2 == 0) ? 0x2104 : C_BG);
+        tft.fillRect(0, y, SCREEN_WIDTH, 17, (i % 2 == 0) ? 0x2104 : C_BG);
 
         // Callsign
         tft.setTextColor(C_ACCENT, (i % 2 == 0) ? 0x2104 : C_BG);
         tft.setCursor(2, y + 5);
         tft.print(s.callsign.length() > 10 ? s.callsign.substring(0,10) : s.callsign);
-
         // Distance / bearing (if we have GPS)
         if (GPS_Utils::hasFix() && s.lat != 0) {
             float dist = APRS_Utils::distanceKm(GPS_Utils::lat(), GPS_Utils::lon(), s.lat, s.lon);
@@ -187,10 +186,13 @@ static void drawStationList() {
         tft.setCursor(280, y + 5);
         tft.print(s.symbol.length() > 0 ? s.symbol[1] : '?');
     }
-}
 
+    tft.setTextColor(C_GREY, C_BG);
+    tft.setCursor(4, SCREEN_HEIGHT - 12);
+    tft.print("Home  |  S:Sts M:Msg W:WiFi P:Prof U:USB B:Bcn");
+}
 static void drawMessagesView() {
-    tft.fillRect(0, 20, TFT_WIDTH, TFT_HEIGHT - 20, Config.msg.bgColour);
+    tft.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, Config.msg.bgColour);
     tft.setTextSize(1);
 
     // ── Chat bubbles (mirrors the website / Android app) ────────────────
@@ -218,7 +220,6 @@ static void drawMessagesView() {
         }
         if (line.length()) wrapped.push_back(line);
         if (wrapped.empty()) wrapped.push_back("");
-
         int bubbleH = (int)wrapped.size() * LINEH + 2 * PAD;
         int bubbleW = 0;
         for (auto& l : wrapped) bubbleW = max(bubbleW, (int)l.length() * CHARW);
@@ -227,7 +228,7 @@ static void drawMessagesView() {
 
         uint16_t bub = m.outgoing ? Config.msg.outBubble : Config.msg.inBubble;
         uint16_t txt = m.outgoing ? Config.msg.outText   : Config.msg.inText;
-        int x = m.outgoing ? (TFT_WIDTH - bubbleW - 4) : 4;
+        int x = m.outgoing ? (SCREEN_WIDTH - bubbleW - 4) : 4;
 
         // Bubble with rounded corners
         tft.fillRoundRect(x, y, bubbleW, bubbleH, 4, bub);
@@ -245,7 +246,7 @@ static void drawMessagesView() {
             ty += LINEH;
         }
         y += bubbleH + 12;
-        if (y > TFT_HEIGHT - 40) break;   // don't overrun the compose bar
+        if (y > SCREEN_HEIGHT - 40) break;   // don't overrun the compose bar
     }
 
     if (hist.empty()) {
@@ -255,16 +256,15 @@ static void drawMessagesView() {
         tft.setCursor(10, 74);
         tft.print("Incoming messages set the reply target.");
     }
-
     // Compose bar at the bottom
-    tft.fillRect(0, TFT_HEIGHT - 34, TFT_WIDTH, 34, 0x2104);
-    tft.drawFastHLine(0, TFT_HEIGHT - 34, TFT_WIDTH, C_ACCENT);
+    tft.fillRect(0, SCREEN_HEIGHT - 34, SCREEN_WIDTH, 34, 0x2104);
+    tft.drawFastHLine(0, SCREEN_HEIGHT - 34, SCREEN_WIDTH, C_ACCENT);
     tft.setTextColor(C_AMBER, 0x2104);
-    tft.setCursor(2, TFT_HEIGHT - 28);
+    tft.setCursor(2, SCREEN_HEIGHT - 28);
     String target = Messaging::getReplyTarget();
     tft.print("To: " + (target.length() ? target : String("(none)")));
     tft.setTextColor(C_WHITE, 0x2104);
-    tft.setCursor(2, TFT_HEIGHT - 14);
+    tft.setCursor(2, SCREEN_HEIGHT - 14);
     String buf = Keyboard_Utils::getBuffer();
     // Show tail of buffer with cursor
     String view = buf.length() > 50 ? buf.substring(buf.length() - 50) : buf;
@@ -284,7 +284,6 @@ int Display_Utils::batteryPercent() {
     if (v >= BAT_FULL_MV)  return 100;
     return (int)((v - BAT_EMPTY_MV) * 100.0f / (BAT_FULL_MV - BAT_EMPTY_MV));
 }
-
 // ── Public API ────────────────────────────────────────────────────────────
 
 // TJpg_Decoder output callback — pushes each decoded MCU block to the TFT.
@@ -325,7 +324,6 @@ void Display_Utils::setup() {
     }
     delay(2500);   // hold the splash so it's readable
 }
-
 void Display_Utils::loop() {
     if (millis() < overlayUntilMs) return;         // hold overlay on screen
     if (millis() - lastRedrawMs < 1000) return;
@@ -390,4 +388,3 @@ void Display_Utils::drawUsbMscScreen(const String& body) {
     tft.setCursor(28, 210);
     tft.print("Card: /tiles/z/x/y.png expected by map");
 }
-

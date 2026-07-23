@@ -84,6 +84,9 @@ bool loadConfig() {
     Config.weather.tempOffset = doc["weather"]["t_offset"] | 0.0f;
     Config.device.bleEnabled  = doc["device"]["ble"]      | false;
 
+    Config.audio.enabled      = doc["audio"]["enabled"]   | true;
+    Config.audio.volume       = doc["audio"]["volume"]    | 70;
+
     initDefaultProfiles();
     Config.activeProfile = doc["active_profile"] | 1;
     JsonArray profs = doc["profiles"].as<JsonArray>();
@@ -168,6 +171,9 @@ bool saveConfig() {
     doc["weather"]["interval"] = Config.weather.wxInterval;
     doc["weather"]["t_offset"] = Config.weather.tempOffset;
     doc["device"]["ble"]       = Config.device.bleEnabled;
+
+    doc["audio"]["enabled"]    = Config.audio.enabled;
+    doc["audio"]["volume"]     = Config.audio.volume;
 
     doc["active_profile"] = Config.activeProfile;
     JsonArray profs = doc["profiles"].to<JsonArray>();

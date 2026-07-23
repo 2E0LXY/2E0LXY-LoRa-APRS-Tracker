@@ -74,7 +74,10 @@ static String buildPage() {
 
     // ── WiFi ──
     h += F("<h2>WiFi</h2>");
-    h += "<label>SSID</label><input name='wifi_ssid' value='" + Config.wifi.ssid + "'>";
+    h += F("<label>Network</label><select id='wifi_sel' onchange=\"document.querySelector('[name=wifi_ssid]').value=this.value\">"
+        "<option value=''>-- Scanning... --</option></select>");
+    h += F("<button type='button' onclick='scanWifi()' style='background:#334155;margin-top:6px'>&#8635; Rescan</button>");
+    h += "<label>SSID (auto-filled from scan, or type manually)</label><input name='wifi_ssid' id='wifi_ssid_field' value='" + Config.wifi.ssid + "'>";
     h += "<label>Password</label><input name='wifi_pass' type='password' value='" + Config.wifi.password + "'>";
 
     // ── aprsnet.uk server (MQTT) ──
@@ -94,7 +97,18 @@ static String buildPage() {
     h += "<div><label>Received bubble</label><input name='c_in' type='color' value='" + rgb565ToHex(Config.msg.inBubble) + "'></div>";
     h += "<div><label>Background</label><input name='c_bg' type='color' value='" + rgb565ToHex(Config.msg.bgColour) + "'></div></div>";
 
-    // ── Display ──
+    // ── Weather sensor (BME280) ──
+    h += F("<h2>Weather Sensor</h2>");
+    h += "<label><input type='checkbox' name='wx_on' " + String(Config.weather.enabled ? "checked" : "") + "> Enable BME280 (auto-detected on I2C)</label>";
+    h += "<label><input type='checkbox' name='wx_tx' " + String(Config.weather.txWx ? "checked" : "") + "> Include WX in APRS beacons</label>";
+    h += "<div class='row'><div><label>Beacon interval (s)</label><input name='wx_interval' type='number' value='" + String(Config.weather.wxInterval) + "'></div>";
+    h += "<div><label>Temp offset (&deg;C)</label><input name='wx_toffset' type='number' step='0.1' value='" + String(Config.weather.tempOffset, 1) + "'></div></div>";
+
+    // ── Audio ──
+    h += F("<h2>Message Sound</h2>");
+    h += "<label><input type='checkbox' name='snd_on' " + String(Config.audio.enabled ? "checked" : "") + "> Play a tone when a message is received</label>";
+    h += "<label>Volume (" + String(Config.audio.volume) + "%)</label><input name='snd_vol' type='range' min='0' max='100' value='" + String(Config.audio.volume) + "' oninput=\"this.previousElementSibling.textContent='Volume ('+this.value+'%)'\">";
+
     // ── Bluetooth ──
     h += F("<h2>Bluetooth (KISS TNC)</h2>");
     h += "<label><input type='checkbox' name='ble_on' " + String(Config.device.bleEnabled ? "checked" : "") + "> Enable BLE KISS TNC (use tracker as a Bluetooth modem for phone apps)</label>";
@@ -102,6 +116,8 @@ static String buildPage() {
 
     h += F("<h2>Display</h2>");
     h += "<label>Brightness (0-255)</label><input name='bright' type='number' min='0' max='255' value='" + String(Config.display.brightness) + "'>";
+    h += "<label>Dim timeout (s, 0 = always on)</label><input name='disp_timeout' type='number' min='0' value='" + String(Config.display.timeout) + "'>";
+    h += "<label><input type='checkbox' name='disp_night' " + String(Config.display.nightMode ? "checked" : "") + "> Night mode (dim red palette)</label>";
 
     h += F("<button type='submit'>&#128190; Save &amp; Reboot</button></form>");
 
@@ -125,6 +141,21 @@ static String buildPage() {
         "document.querySelector('[name=power]').value=p.pw;"
         "document.querySelector('[name=path]').value=p.path;"
         "document.querySelector('[name=tx_ok]').checked=false;}"
+        "function scanWifi(){"
+        "var sel=document.getElementById('wifi_sel');"
+        "sel.innerHTML='<option value=\"\">-- Scanning... --</option>';"
+        "fetch('/wifiscan').then(r=>r.json()).then(list=>{"
+        "sel.innerHTML='<option value=\"\">-- Select a network --</option>';"
+        "list.forEach(n=>{"
+        "var o=document.createElement('option');"
+        "o.value=n.ssid;"
+        "o.textContent=n.ssid+' ('+n.rssi+'dBm'+(n.secure?', locked':', open')+')';"
+        "if(n.ssid===document.getElementById('wifi_ssid_field').value)o.selected=true;"
+        "sel.appendChild(o);"
+        "});"
+        "}).catch(()=>{sel.innerHTML='<option value=\"\">Scan failed - tap Rescan</option>';});"
+        "}"
+        "window.addEventListener('load',scanWifi);"
         "</script></body></html>");
     return h;
 }
@@ -189,7 +220,17 @@ static void handleSave() {
     Config.msg.inBubble  = hexToRgb565(arg("c_in"));
     Config.msg.bgColour  = hexToRgb565(arg("c_bg"));
 
+    Config.weather.enabled    = has("wx_on");
+    Config.weather.txWx       = has("wx_tx");
+    Config.weather.wxInterval = arg("wx_interval").toInt();
+    Config.weather.tempOffset = arg("wx_toffset").toFloat();
+
+    Config.audio.enabled = has("snd_on");
+    Config.audio.volume  = arg("snd_vol").toInt();
+
     Config.display.brightness = arg("bright").toInt();
+    Config.display.timeout    = arg("disp_timeout").toInt();
+    Config.display.nightMode  = has("disp_night");
 
     saveConfig();
     server.send(200, "text/html",
@@ -206,6 +247,33 @@ static void handleBeacon() {
         "<h2>&#128225; Beacon sent!</h2><a href='/' style='color:#38bdf8'>Back</a></body></html>");
 }
 
+// Scans nearby WiFi APs and returns them as JSON, sorted strongest-first,
+// deduplicated by SSID (keeping the strongest AP per SSID). AP+STA mode
+// (already set in begin()) lets this run without dropping the setup AP.
+static void handleWifiScan() {
+    int n = WiFi.scanNetworks();
+    String json = "[";
+    bool first = true;
+    for (int i = 0; i < n; i++) {
+        String ssid = WiFi.SSID(i);
+        if (ssid.length() == 0) continue;
+        // Skip if we've already emitted a stronger entry for this SSID
+        bool dup = false;
+        for (int j = 0; j < i; j++) { if (WiFi.SSID(j) == ssid) { dup = true; break; } }
+        if (dup) continue;
+        if (!first) json += ",";
+        first = false;
+        String esc = ssid;
+        esc.replace("\\", "\\\\");
+        esc.replace("\"", "\\\"");
+        json += "{\"ssid\":\"" + esc + "\",\"rssi\":" + String(WiFi.RSSI(i)) +
+                ",\"secure\":" + String(WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "true" : "false") + "}";
+    }
+    json += "]";
+    WiFi.scanDelete();
+    server.send(200, "application/json", json);
+}
+
 void WebConfig::begin() {
     // AP mode: SSID "2E0LXY-Tracker", open (operator is physically present)
     WiFi.mode(WIFI_AP_STA);
@@ -214,6 +282,7 @@ void WebConfig::begin() {
     server.on("/", handleRoot);
     server.on("/save", HTTP_POST, handleSave);
     server.on("/beacon", HTTP_POST, handleBeacon);
+    server.on("/wifiscan", HTTP_GET, handleWifiScan);
     server.begin();
     running = true;
     Serial.print("WebConfig AP up: http://");

@@ -19,6 +19,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <SPI.h>
 #include "board_pins.h"
 #include "configuration.h"
 #include "gps_utils.h"
@@ -34,6 +35,7 @@
 #include "usb_msc.h"
 #include "weather_utils.h"
 #include "ble_kiss.h"
+#include "audio_utils.h"
 
 // ── Forward declarations ──────────────────────────────────────────────────
 void handleKeyInput(char key);
@@ -76,6 +78,9 @@ void setup() {
     Weather_Utils::setup();
     Serial.printf("Heap after weather: %u\n", ESP.getFreeHeap());
 
+    // Audio (message notification tone) — lazy I2S init on first play
+    Audio_Utils::setup();
+
     // BLE KISS TNC — only if explicitly enabled (OFF by default; the BLE
     // stack + WiFi + SPI at boot is memory-heavy and can prevent booting).
     if (Config.device.bleEnabled) {
@@ -83,7 +88,7 @@ void setup() {
         Serial.printf("Heap after BLE: %u\n", ESP.getFreeHeap());
     }
 
-    // LoRa
+    // LoRa (shares the display's SPI bus/instance — see lora_utils.cpp)
     if (!LoRa_Utils::setup()) {
         Display_Utils::showMessage("LoRa Error", "SX1262 init failed — check hardware", TFT_RED);
         delay(3000);
@@ -92,8 +97,13 @@ void setup() {
     // WiFi (non-blocking)
     if (Config.wifi.enabled && Config.wifi.ssid.length() > 0) {
         WiFi.mode(WIFI_STA);
+        // Identify as "T-Deck-<callsign>" in the router's connected-clients
+        // list (DHCP hostname) instead of the generic default. Must be set
+        // after WiFi.mode() and before WiFi.begin().
+        String hostname = "T-Deck-" + fullCallsign();
+        WiFi.setHostname(hostname.c_str());
         WiFi.begin(Config.wifi.ssid.c_str(), Config.wifi.password.c_str());
-        Serial.printf("WiFi: connecting to %s\n", Config.wifi.ssid.c_str());
+        Serial.printf("WiFi: connecting to %s as '%s'\n", Config.wifi.ssid.c_str(), hostname.c_str());
     }
 
     Serial.printf("Callsign: %s  Freq: %.4f MHz  SF%d\n",
@@ -188,6 +198,7 @@ void handleAPRSMessage(const String& from, const String& text, const String& msg
     Serial.printf("MSG from %s: %s {%s}\n", from.c_str(), text.c_str(), msgID.c_str());
     Messaging::receive(from, text, msgID);
     Display_Utils::showMessage("MSG: " + from, text, TFT_CYAN);
+    Audio_Utils::playMessageTone();
 
     // Send ACK only if the message carried an {ID} (per APRS spec)
     if (msgID.length() > 0) {
@@ -200,6 +211,21 @@ void handleAPRSMessage(const String& from, const String& text, const String& msg
 // ── Keyboard navigation & input ───────────────────────────────────────────
 void handleKeyInput(char key) {
     bool inMessages = (Display_Utils::getView() == VIEW_MESSAGES);
+    bool isDelete = (key == '\b' || key == 0x08 || key == 0x7F);
+
+    // Delete/backspace outside compose mode always returns to the home
+    // screen (Stations — callsigns heard). Inside Messages it backspaces
+    // the typed text as before — except on an already-empty buffer, where
+    // there's nothing left to delete, so it also returns home instead of
+    // doing nothing.
+    if (isDelete && !inMessages) {
+        Display_Utils::setView(VIEW_STATIONS);
+        return;
+    }
+    if (isDelete && inMessages && Keyboard_Utils::getBuffer().length() == 0) {
+        Display_Utils::setView(VIEW_STATIONS);
+        return;
+    }
 
     // ── Compose mode: printable characters go to the buffer FIRST so
     //    digits and 'b' are typable inside a message ─────────────────────
@@ -208,8 +234,8 @@ void handleKeyInput(char key) {
             String buf = Keyboard_Utils::getBuffer();
             String dest = Messaging::getReplyTarget();
             if (buf.length() == 0) {
-                // Enter on empty buffer exits messages view
-                Display_Utils::setView(VIEW_STATUS);
+                // Enter on empty buffer exits messages view (to home)
+                Display_Utils::setView(VIEW_STATIONS);
                 return;
             }
             if (dest.length() > 0) {
@@ -251,10 +277,14 @@ void handleKeyInput(char key) {
     }
 
     // ── Navigation (outside messages view) ──────────────────────────────
-    if (key == '1') { Display_Utils::setView(VIEW_STATUS);   return; }
-    if (key == '2') { Display_Utils::setView(VIEW_STATIONS); return; }
-    if (key == '3') { Display_Utils::setView(VIEW_MESSAGES); return; }
-    if (key == '4') {
+    // Letter aliases (s/t/m/w/p/u) alongside the printed digits — the
+    // T-Deck keyboard co-processor resolves its own shift/symbol layer
+    // before the byte reaches us, so Alt+<number-row key> doesn't reliably
+    // produce '1'-'6' here. Plain letters always arrive unmodified.
+    if (key == '1' || key == 's' || key == 'S') { Display_Utils::setView(VIEW_STATUS);   return; }
+    if (key == '2' || key == 't' || key == 'T') { Display_Utils::setView(VIEW_STATIONS); return; }
+    if (key == '3' || key == 'm' || key == 'M') { Display_Utils::setView(VIEW_MESSAGES); return; }
+    if (key == '4' || key == 'w') {
         // Launch WiFi settings portal
         if (!WebConfig::isRunning()) {
             WebConfig::begin();
@@ -271,7 +301,7 @@ void handleKeyInput(char key) {
         Display_Utils::showMessage("Beacon", "Manual beacon sent", TFT_GREEN);
         return;
     }
-    if (key == '5') {
+    if (key == '5' || key == 'p') {
         // Cycle operating profile: Walking -> Car -> Bicycle -> Stationary
         int next = (Config.activeProfile + 1) % 4;
         applyOpProfile(next);
@@ -279,7 +309,7 @@ void handleKeyInput(char key) {
         Display_Utils::showMessage("Profile", "Now: " + Config.profiles[next].name, TFT_CYAN);
         return;
     }
-    if (key == '6') {
+    if (key == '6' || key == 'u') {
         // USB Mass Storage mode — present the SD card to a host computer so the
         // aprsnet.uk Map Downloader can write tiles straight onto it. This takes
         // over the SD/SPI bus, so we show a dedicated screen and block until the
