@@ -22,7 +22,17 @@ namespace Display_Utils {
     DisplayView getView();
     void        setBrightness(int v);
     void        showMessage(const String& title, const String& body, uint16_t colour = 0x07FF);
-    void        drawUsbMscScreen(const String& body);
     float       batteryVolts();
     int         batteryPercent();
+
+    // ── Map view helpers (used by map_utils.cpp) ──────────────────────
+    // Keep the TFT_eSPI object private to display_utils.cpp; the map
+    // module only needs these narrow drawing primitives, not the full
+    // TFT_eSPI API.
+    void mapClearArea(int top, int height);
+    void mapPushTileLine(int x, int y, int w, uint16_t* line);
+    void mapPushIcon(int x, int y, const uint16_t* iconRGB565, int size, uint16_t transparentColour);
+    void mapDrawCrosshair(int x, int y);
+    void mapDrawFooter(int y, int zoomLevel);
+    void mapDrawNoCard();
 }

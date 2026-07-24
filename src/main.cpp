@@ -32,10 +32,10 @@
 #include "messaging.h"
 #include "ota_utils.h"
 #include "webconfig.h"
-#include "usb_msc.h"
 #include "weather_utils.h"
 #include "ble_kiss.h"
 #include "audio_utils.h"
+#include "map_utils.h"
 
 // ── Forward declarations ──────────────────────────────────────────────────
 void handleKeyInput(char key);
@@ -67,6 +67,9 @@ void setup() {
 
     // Display
     Display_Utils::setup();
+
+    // Map (SD/tiles brought up on first draw, not at boot)
+    Map_Utils::setup();
 
     // GPS
     GPS_Utils::setup();
@@ -112,10 +115,6 @@ void setup() {
 
 // ── Main loop ─────────────────────────────────────────────────────────────
 void loop() {
-    // While the SD card is presented over USB, the tracker is paused — the
-    // host owns the card/bus. Only service USB until reboot.
-    if (USB_MSC::isActive()) { delay(50); return; }
-
     // GPS NMEA
     GPS_Utils::loop();
 
@@ -284,6 +283,22 @@ void handleKeyInput(char key) {
     if (key == '1' || key == 's' || key == 'S') { Display_Utils::setView(VIEW_STATUS);   return; }
     if (key == '2' || key == 't' || key == 'T') { Display_Utils::setView(VIEW_STATIONS); return; }
     if (key == '3' || key == 'm' || key == 'M') { Display_Utils::setView(VIEW_MESSAGES); return; }
+    if (key == 'x' || key == 'X') { Display_Utils::setView(VIEW_MAP); return; }
+    // Map pan/zoom — checked and consumed before any other letter binding
+    // so it can't be shadowed by globals like 'w' (WiFi portal) or
+    // 's'/'t'/'m' (view switches). Trackball isn't wired to firmware yet
+    // (GPIOs are defined in board_pins.h but unused — see TBOX_* pins),
+    // so this is keyboard-only for now: I/O zoom, comma/period pan
+    // left/right, semicolon/quote pan up/down, G recentre on GPS.
+    if (Display_Utils::getView() == VIEW_MAP) {
+        if (key == 'i' || key == 'I') { Map_Utils::zoomIn();       return; }
+        if (key == 'o' || key == 'O') { Map_Utils::zoomOut();      return; }
+        if (key == 'g' || key == 'G') { Map_Utils::centreOnGPS();  return; }
+        if (key == ',') { Map_Utils::panBy(-1, 0); return; }
+        if (key == '.') { Map_Utils::panBy(1, 0);  return; }
+        if (key == ';') { Map_Utils::panBy(0, -1); return; }
+        if (key == '\'') { Map_Utils::panBy(0, 1); return; }
+    }
     if (key == '4' || key == 'w') {
         // Launch WiFi settings portal
         if (!WebConfig::isRunning()) {
@@ -307,19 +322,6 @@ void handleKeyInput(char key) {
         applyOpProfile(next);
         saveConfig();
         Display_Utils::showMessage("Profile", "Now: " + Config.profiles[next].name, TFT_CYAN);
-        return;
-    }
-    if (key == '6' || key == 'u') {
-        // USB Mass Storage mode — present the SD card to a host computer so the
-        // aprsnet.uk Map Downloader can write tiles straight onto it. This takes
-        // over the SD/SPI bus, so we show a dedicated screen and block until the
-        // device is rebooted (host should eject first).
-        Display_Utils::drawUsbMscScreen("Starting USB drive mode...");
-        if (USB_MSC::begin()) {
-            Display_Utils::drawUsbMscScreen("SD card is now a USB drive.\n\nWrite your maps from a computer,\neject it, then press RESET to\nreturn to tracker mode.");
-        } else {
-            Display_Utils::showMessage("USB Drive", "No SD card found - insert a card and try again", TFT_RED);
-        }
         return;
     }
 }

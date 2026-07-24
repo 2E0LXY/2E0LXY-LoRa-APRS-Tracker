@@ -12,6 +12,7 @@
 #include <WiFi.h>
 #include "keyboard_utils.h"
 #include "messaging.h"
+#include "map_utils.h"
 #include <algorithm>
 #include <vector>
 
@@ -123,7 +124,7 @@ static void drawStatusView() {
     // Key hints
     tft.setTextColor(C_GREY, C_BG);
     tft.setCursor(4, SCREEN_HEIGHT - 12);
-    tft.print("S:Sts T:Stn M:Msg W:WiFi P:Prof U:USB B:Bcn");
+    tft.print("S:Sts T:Stn M:Msg W:WiFi P:Prof B:Bcn");
 }
 static void drawStationList() {
     tft.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
@@ -135,7 +136,7 @@ static void drawStationList() {
         tft.setCursor(10, 60);
         tft.print("No stations heard yet.");
         tft.setCursor(4, SCREEN_HEIGHT - 12);
-        tft.print("Home  |  S:Sts M:Msg W:WiFi P:Prof U:USB B:Bcn");
+        tft.print("Home  |  S:Sts M:Msg W:WiFi P:Prof B:Bcn");
         return;
     }
 
@@ -189,7 +190,7 @@ static void drawStationList() {
 
     tft.setTextColor(C_GREY, C_BG);
     tft.setCursor(4, SCREEN_HEIGHT - 12);
-    tft.print("Home  |  S:Sts M:Msg W:WiFi P:Prof U:USB B:Bcn");
+    tft.print("Home  |  S:Sts M:Msg W:WiFi P:Prof B:Bcn");
 }
 static void drawMessagesView() {
     tft.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, Config.msg.bgColour);
@@ -271,6 +272,53 @@ static void drawMessagesView() {
     tft.print(view + "_");
 }
 
+// ── Map view drawing primitives (used by map_utils.cpp) ─────────────────
+// Kept narrow and TFT-object-private so map_utils.cpp doesn't need direct
+// TFT_eSPI access — mirrors how the other views only ever touch `tft`
+// from inside this file.
+void Display_Utils::mapClearArea(int top, int height) {
+    tft.fillRect(0, top, SCREEN_WIDTH, height, TFT_BLACK);
+}
+
+void Display_Utils::mapPushTileLine(int x, int y, int w, uint16_t* line) {
+    if (y < 0 || y >= SCREEN_HEIGHT) return;
+    int drawW = w;
+    if (x < 0) { line -= x; drawW += x; x = 0; }          // clip left
+    if (x + drawW > SCREEN_WIDTH) drawW = SCREEN_WIDTH - x; // clip right
+    if (drawW <= 0) return;
+    tft.pushImage(x, y, drawW, 1, line);
+}
+
+void Display_Utils::mapPushIcon(int x, int y, const uint16_t* iconRGB565, int size, uint16_t transparentColour) {
+    tft.pushImage(x, y, size, size, iconRGB565, transparentColour);
+}
+
+void Display_Utils::mapDrawCrosshair(int x, int y) {
+    tft.drawFastHLine(x - 6, y, 13, C_ACCENT);
+    tft.drawFastVLine(x, y - 6, 13, C_ACCENT);
+    tft.drawCircle(x, y, 4, C_ACCENT);
+}
+
+void Display_Utils::mapDrawFooter(int y, int zoomLevel) {
+    tft.fillRect(0, y, SCREEN_WIDTH, SCREEN_HEIGHT - y, C_STATUS);
+    tft.setTextColor(C_WHITE, C_STATUS);
+    tft.setCursor(4, y + 3);
+    tft.printf("Zoom %d  |  Home  |  +/- zoom  Trackball pan", zoomLevel);
+}
+
+void Display_Utils::mapDrawNoCard() {
+    tft.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
+    tft.setTextColor(C_AMBER, C_BG);
+    tft.setCursor(20, 80);
+    tft.println("No SD card / no cached tiles.");
+    tft.setCursor(20, 96);
+    tft.println("Use the Map Downloader on");
+    tft.setCursor(20, 110);
+    tft.println("aprsnet.uk, then USB mode (U)");
+    tft.setCursor(20, 124);
+    tft.println("to copy tiles to the card.");
+}
+
 // ── Battery ───────────────────────────────────────────────────────────────
 float Display_Utils::batteryVolts() {
     // Divider halves the LiPo voltage into the ADC
@@ -328,6 +376,18 @@ void Display_Utils::loop() {
     if (millis() < overlayUntilMs) return;         // hold overlay on screen
     if (millis() - lastRedrawMs < 1000) return;
     lastRedrawMs = millis();
+    // Map view redraws itself on its own (slower) cadence — tile decode
+    // from SD is expensive, so it isn't worth doing every second like the
+    // text-only views. It still gets the status bar for consistency.
+    if (currentView == VIEW_MAP) {
+        static uint32_t lastMapDrawMs = 0;
+        drawStatusBar();
+        if (millis() - lastMapDrawMs > 3000) {
+            lastMapDrawMs = millis();
+            Map_Utils::draw();
+        }
+        return;
+    }
     drawStatusBar();
     switch (currentView) {
         case VIEW_STATUS:   drawStatusView();   break;
@@ -360,31 +420,4 @@ void Display_Utils::showMessage(const String& title, const String& body, uint16_
         } else word += c;
     }
     if (line.length()) { tft.setCursor(28, tft.getCursorY()); tft.println(line); }
-}
-// Full-screen USB drive mode notice. Handles \n line breaks manually.
-void Display_Utils::drawUsbMscScreen(const String& body) {
-    tft.fillScreen(0x0000);
-    tft.setTextColor(C_ACCENT, 0x0000);
-    tft.setTextSize(2);
-    tft.setCursor(40, 20);
-    tft.print("USB DRIVE MODE");
-    tft.setTextSize(1);
-    tft.setTextColor(C_WHITE, 0x0000);
-    int y = 70;
-    String line;
-    for (char c : body + '\n') {
-        if (c == '\n') {
-            tft.setCursor(20, y);
-            tft.print(line);
-            line = "";
-            y += 16;
-        } else {
-            line += c;
-        }
-    }
-    // USB icon-ish flourish
-    tft.drawRect(20, 200, 280, 30, C_ACCENT);
-    tft.setTextColor(C_AMBER, 0x0000);
-    tft.setCursor(28, 210);
-    tft.print("Card: /tiles/z/x/y.png expected by map");
 }
