@@ -89,35 +89,84 @@ ParsedPacket APRS_Utils::parsePacket(const String& raw) {
 
     // Basic position decode for ! or = types
     if (p.type == '!' || p.type == '=' || p.type == '@' || p.type == '/') {
-        // Try to parse DDmm.hhN format
         int pos = 1;
         if (p.type == '@' || p.type == '/') pos = 8; // skip timestamp
-        if (pos + 19 < (int)info.length()) {
-            // Extract lat/lon from fixed-format position
-            String latStr = info.substring(pos, pos + 8);    // DDmm.hhN
-            char sym1 = info[pos + 8];
-            String lonStr = info.substring(pos + 9, pos + 18); // DDDmm.hhE
-            char sym2 = info[pos + 18];
-            p.symbol = String(sym1) + String(sym2);
+        if (pos < (int)info.length()) {
+            // Try strict uncompressed format first: DDmm.hhN/DDDmm.hhE —
+            // validated by position/type of every character, not just
+            // "starts with a digit" (that alone isn't enough: compressed
+            // format's symbol-table char can also be 0-9, so a lone digit
+            // check misidentifies compressed packets whose table char
+            // happens to be numeric).
+            bool uncompressedOk = false;
+            if (pos + 19 < (int)info.length()) {
+                auto isDigit = [](char c){ return c >= '0' && c <= '9'; };
+                String latStr = info.substring(pos, pos + 8);
+                char sym1 = info[pos + 8];
+                String lonStr = info.substring(pos + 9, pos + 18);
+                char sym2 = info[pos + 18];
+                uncompressedOk = isDigit(latStr[0]) && isDigit(latStr[1])
+                    && isDigit(latStr[2]) && isDigit(latStr[3]) && latStr[4] == '.'
+                    && isDigit(latStr[5]) && isDigit(latStr[6])
+                    && (latStr[7] == 'N' || latStr[7] == 'S')
+                    && isDigit(lonStr[0]) && isDigit(lonStr[1]) && isDigit(lonStr[2])
+                    && isDigit(lonStr[3]) && isDigit(lonStr[4]) && lonStr[5] == '.'
+                    && isDigit(lonStr[6]) && isDigit(lonStr[7])
+                    && (lonStr[8] == 'E' || lonStr[8] == 'W');
 
-            int latDeg = latStr.substring(0,2).toInt();
-            float latMin = latStr.substring(2,7).toFloat();
-            char latHemi = latStr[7];
-            p.lat = latDeg + latMin / 60.0f;
-            if (latHemi == 'S') p.lat = -p.lat;
+                if (uncompressedOk) {
+                    p.symbol = String(sym1) + String(sym2);
+                    int latDeg = latStr.substring(0,2).toInt();
+                    float latMin = latStr.substring(2,7).toFloat();
+                    p.lat = latDeg + latMin / 60.0f;
+                    if (latStr[7] == 'S') p.lat = -p.lat;
+                    int lonDeg = lonStr.substring(0,3).toInt();
+                    float lonMin = lonStr.substring(3,8).toFloat();
+                    p.lon = lonDeg + lonMin / 60.0f;
+                    if (lonStr[8] == 'W') p.lon = -p.lon;
+                    p.hasPosition = (p.lat != 0 || p.lon != 0)
+                                  && p.lat >= -90.0f && p.lat <= 90.0f
+                                  && p.lon >= -180.0f && p.lon <= 180.0f;
+                    p.comment = info.substring(pos + 19);
+                }
+            }
 
-            int lonDeg = lonStr.substring(0,3).toInt();
-            float lonMin = lonStr.substring(3,8).toFloat();
-            char lonHemi = lonStr[8];
-            p.lon = lonDeg + lonMin / 60.0f;
-            if (lonHemi == 'W') p.lon = -p.lon;
-            // Sanity: reject out-of-range coordinates from malformed packets
-            p.hasPosition = (p.lat != 0 || p.lon != 0)
-                          && p.lat >= -90.0f && p.lat <= 90.0f
-                          && p.lon >= -180.0f && p.lon <= 180.0f;
+            // Compressed (Base91) format — used by OE5BPA/LoRa_APRS_Tracker/
+            // most ESP32 LoRa nodes, confirmed against the aprsnet.uk Go
+            // server's own compPosRegex: DTI, table-char [/\\0-9A-Z] (NOT
+            // just '/' or '\\' — this iGate's own compression can and does
+            // use a letter here), 4 Base91 lat chars, 4 Base91 lon chars,
+            // symbol code, 2-char course/speed, 1-byte compression type.
+            if (!uncompressedOk && pos + 13 <= (int)info.length()) {
+                char table = info[pos];
+                bool tableOk = (table == '/' || table == '\\')
+                    || (table >= '0' && table <= '9')
+                    || (table >= 'A' && table <= 'Z');
+                auto inB91Range = [](char c) { return c >= 0x21 && c <= 0x7b; };
+                bool b91Ok = true;
+                for (int i = 1; i <= 8; i++) {
+                    if (!inB91Range(info[pos + i])) { b91Ok = false; break; }
+                }
+                if (tableOk && b91Ok) {
+                    auto b91 = [](char c) -> long { return (long)c - 33; };
+                    long latVal = b91(info[pos+1]);
+                    latVal = latVal * 91 + b91(info[pos+2]);
+                    latVal = latVal * 91 + b91(info[pos+3]);
+                    latVal = latVal * 91 + b91(info[pos+4]);
+                    long lonVal = b91(info[pos+5]);
+                    lonVal = lonVal * 91 + b91(info[pos+6]);
+                    lonVal = lonVal * 91 + b91(info[pos+7]);
+                    lonVal = lonVal * 91 + b91(info[pos+8]);
+                    char symCode = info[pos+9];
 
-            // Comment (everything after symbol)
-            p.comment = info.substring(pos + 19);
+                    p.lat = 90.0f - (latVal / 380926.0f);
+                    p.lon = -180.0f + (lonVal / 190463.0f);
+                    p.symbol = String(table) + String(symCode);
+                    p.hasPosition = p.lat >= -90.0f && p.lat <= 90.0f
+                                  && p.lon >= -180.0f && p.lon <= 180.0f;
+                    p.comment = info.substring(pos + 13);
+                }
+            }
         }
     }
 
