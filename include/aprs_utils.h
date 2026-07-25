@@ -4,12 +4,15 @@
 
 #define MAX_STATIONS 64
 
+enum class HeardVia { RF, INET };
+
 struct ParsedPacket {
     String fromCall, toCall, path, text, msgID, symbol, comment, raw;
     float  lat = 0, lon = 0;
     float  rssi = 0, snr = 0;
     char   type = 0;
     bool   valid = false, hasPosition = false, isMessage = false;
+    HeardVia via = HeardVia::RF;   // set by the caller: RF (LoRa) or INET (APRS-IS)
 };
 
 struct HeardStation {
@@ -17,6 +20,8 @@ struct HeardStation {
     float    lat = 0, lon = 0;
     float    rssi = 0, snr = 0;
     uint32_t lastHeardMs = 0;
+    HeardVia via = HeardVia::RF;         // how the MOST RECENT packet arrived
+    bool     everHeardRF = false;        // true if we've ever heard this station directly over LoRa
 };
 
 using StationList = std::vector<HeardStation>;

@@ -175,6 +175,7 @@ void APRS_Utils::loop() {
         if (line.length() < 5) continue;
         rxCount++;
         ParsedPacket p = parsePacket(line);
+        p.via = HeardVia::INET;
         if (p.valid && p.hasPosition) {
             updateStation(p.fromCall, p);
         }
@@ -199,7 +200,14 @@ void APRS_Utils::updateStation(const String& call, const ParsedPacket& p) {
             s.lat = p.lat; s.lon = p.lon;
             s.symbol = p.symbol; s.comment = p.comment;
             s.lastHeardMs = millis();
-            s.rssi = p.rssi; s.snr = p.snr;
+            s.via = p.via;
+            if (p.via == HeardVia::RF) {
+                s.rssi = p.rssi; s.snr = p.snr;
+                s.everHeardRF = true;
+            }
+            // An internet-relayed packet doesn't carry real RF signal
+            // metrics — keep showing the last genuine RF reading (if any)
+            // rather than overwrite it with zeros.
             return;
         }
     }
@@ -217,7 +225,12 @@ void APRS_Utils::updateStation(const String& call, const ParsedPacket& p) {
     HeardStation s;
     s.callsign = call; s.lat = p.lat; s.lon = p.lon;
     s.symbol = p.symbol; s.comment = p.comment;
-    s.lastHeardMs = millis(); s.rssi = p.rssi; s.snr = p.snr;
+    s.lastHeardMs = millis();
+    s.via = p.via;
+    if (p.via == HeardVia::RF) {
+        s.rssi = p.rssi; s.snr = p.snr;
+        s.everHeardRF = true;
+    }
     heardStations.push_back(s);
 }
 

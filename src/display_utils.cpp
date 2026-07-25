@@ -170,21 +170,25 @@ static void drawStationList() {
             tft.printf("%.0f°", bear);
         }
 
-        // RSSI
-        tft.setTextColor(s.rssi > -90 ? C_GREEN : C_AMBER, (i % 2 == 0) ? 0x2104 : C_BG);
+        // Source (RF = yellow, INET = green) + RSSI
+        bool viaRF = (s.via == HeardVia::RF);
+        tft.setTextColor(viaRF ? C_AMBER : C_GREEN, (i % 2 == 0) ? 0x2104 : C_BG);
         tft.setCursor(190, y + 5);
-        if (s.rssi != 0) tft.printf("%.0fdB", s.rssi);
+        tft.print(viaRF ? "RF" : "INT");
+        tft.setTextColor(C_WHITE, (i % 2 == 0) ? 0x2104 : C_BG);
+        tft.setCursor(213, y + 5);
+        if (s.everHeardRF) tft.printf("%.0fdB", s.rssi);
 
         // Age
         tft.setTextColor(C_GREY, (i % 2 == 0) ? 0x2104 : C_BG);
-        tft.setCursor(240, y + 5);
+        tft.setCursor(255, y + 5);
         uint32_t age = (millis() - s.lastHeardMs) / 1000;
         if (age < 60) tft.printf("%ds", age);
         else          tft.printf("%dm", age/60);
 
         // Symbol hint
         tft.setTextColor(C_PURPLE, (i % 2 == 0) ? 0x2104 : C_BG);
-        tft.setCursor(280, y + 5);
+        tft.setCursor(295, y + 5);
         tft.print(s.symbol.length() > 0 ? s.symbol[1] : '?');
     }
 
