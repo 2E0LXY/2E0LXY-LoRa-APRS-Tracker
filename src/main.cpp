@@ -23,6 +23,7 @@
 #include "board_pins.h"
 #include "configuration.h"
 #include "gps_utils.h"
+#include "satellites_utils.h"
 #include "lora_utils.h"
 #include "aprs_utils.h"
 #include "beacon_utils.h"
@@ -73,6 +74,7 @@ void setup() {
 
     // GPS
     GPS_Utils::setup();
+    Satellites_Utils::setup();   // per-satellite sky-plot data (attaches to GPS_Utils::gps)
 
     // Keyboard
     Keyboard_Utils::setup();
@@ -117,6 +119,7 @@ void setup() {
 void loop() {
     // GPS NMEA
     GPS_Utils::loop();
+    Satellites_Utils::loop();
 
     // LoRa receive
     LoRa_Utils::loop();
@@ -284,6 +287,7 @@ void handleKeyInput(char key) {
     if (key == '2' || key == 't' || key == 'T') { Display_Utils::setView(VIEW_STATIONS); return; }
     if (key == '3' || key == 'm' || key == 'M') { Display_Utils::setView(VIEW_MESSAGES); return; }
     if (key == 'x' || key == 'X') { Display_Utils::setView(VIEW_MAP); return; }
+    if (key == 'v' || key == 'V') { Display_Utils::setView(VIEW_SATS); return; }
     // Map pan/zoom — checked and consumed before any other letter binding
     // so it can't be shadowed by globals like 'w' (WiFi portal) or
     // 's'/'t'/'m' (view switches). Trackball isn't wired to firmware yet

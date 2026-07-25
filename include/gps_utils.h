@@ -1,5 +1,11 @@
 #pragma once
 #include <Arduino.h>
+#include <TinyGPS++.h>
+
+// Shared TinyGPSPlus instance — satellites_utils.cpp attaches TinyGPSCustom
+// watchers to this same object to pull per-satellite GSV data, rather than
+// running a second parser against the same UART stream.
+extern TinyGPSPlus gps;
 
 struct GPSData {
     float  lat       = 0, lon = 0;

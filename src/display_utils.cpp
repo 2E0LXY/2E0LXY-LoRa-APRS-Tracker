@@ -13,10 +13,18 @@
 #include "keyboard_utils.h"
 #include "messaging.h"
 #include "map_utils.h"
+#include "satellites_utils.h"
 #include <algorithm>
 #include <vector>
 
 static TFT_eSPI tft = TFT_eSPI();
+// Full-screen framebuffer. Every 1s redraw previously cleared and redrew
+// straight to the physical ST7789 with no double buffering, which showed
+// as a visible flicker. Drawing the whole frame into this PSRAM sprite
+// first, then pushing it in one go, means the panel only ever sees a
+// complete finished frame. Created once in Display_Utils::setup().
+static TFT_eSprite spr = TFT_eSprite(&tft);
+static bool spriteReady = false;
 static DisplayView currentView = VIEW_STATIONS;   // home screen: callsigns heard
 static uint32_t lastRedrawMs = 0;
 static uint32_t overlayUntilMs = 0;   // suppress redraw while an overlay message is showing
@@ -34,109 +42,109 @@ static uint32_t overlayUntilMs = 0;   // suppress redraw while an overlay messag
 
 static void drawStatusBar() {
     // Top 20px status bar
-    tft.fillRect(0, 0, SCREEN_WIDTH, 20, C_STATUS);
-    tft.setTextColor(C_WHITE, C_STATUS);
-    tft.setTextSize(1);
+    spr.fillRect(0, 0, SCREEN_WIDTH, 20, C_STATUS);
+    spr.setTextColor(C_WHITE, C_STATUS);
+    spr.setTextSize(1);
 
     // Callsign
-    tft.setCursor(4, 6);
-    tft.print(fullCallsign());
+    spr.setCursor(4, 6);
+    spr.print(fullCallsign());
 
     // GPS status
-    tft.setCursor(90, 6);
+    spr.setCursor(90, 6);
     if (GPS_Utils::hasFix()) {
-        tft.setTextColor(C_GREEN, C_STATUS);
-        tft.printf("GPS %d", GPS_Utils::sats());
+        spr.setTextColor(C_GREEN, C_STATUS);
+        spr.printf("GPS %d", GPS_Utils::sats());
     } else {
-        tft.setTextColor(C_AMBER, C_STATUS);
-        tft.print("NO GPS");
+        spr.setTextColor(C_AMBER, C_STATUS);
+        spr.print("NO GPS");
     }
 
     // WiFi
-    tft.setTextColor(WiFi.isConnected() ? C_GREEN : C_GREY, C_STATUS);
-    tft.setCursor(140, 6); tft.print("WiFi");
+    spr.setTextColor(WiFi.isConnected() ? C_GREEN : C_GREY, C_STATUS);
+    spr.setCursor(140, 6); spr.print("WiFi");
 
     // MQTT
-    tft.setTextColor(MQTT_Utils::isConnected() ? C_ACCENT : C_GREY, C_STATUS);
-    tft.setCursor(180, 6); tft.print("MQTT");
+    spr.setTextColor(MQTT_Utils::isConnected() ? C_ACCENT : C_GREY, C_STATUS);
+    spr.setCursor(180, 6); spr.print("MQTT");
 
     // APRS-IS
-    tft.setTextColor(APRS_Utils::isConnected() ? C_GREEN : C_GREY, C_STATUS);
-    tft.setCursor(220, 6); tft.print("IS");
+    spr.setTextColor(APRS_Utils::isConnected() ? C_GREEN : C_GREY, C_STATUS);
+    spr.setCursor(220, 6); spr.print("IS");
 
     // Stations heard count
-    tft.setTextColor(C_WHITE, C_STATUS);
-    tft.setCursor(240, 6);
-    tft.printf("Rx:%d", (int)APRS_Utils::heardStations.size());
+    spr.setTextColor(C_WHITE, C_STATUS);
+    spr.setCursor(240, 6);
+    spr.printf("Rx:%d", (int)APRS_Utils::heardStations.size());
 
     // Battery
     int pct = Display_Utils::batteryPercent();
-    tft.setTextColor(pct > 30 ? C_GREEN : (pct > 15 ? C_AMBER : C_RED), C_STATUS);
-    tft.setCursor(290, 6);
-    tft.printf("%d%%", pct);
+    spr.setTextColor(pct > 30 ? C_GREEN : (pct > 15 ? C_AMBER : C_RED), C_STATUS);
+    spr.setCursor(290, 6);
+    spr.printf("%d%%", pct);
 }
 static void drawStatusView() {
-    tft.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
-    tft.setTextColor(C_WHITE, C_BG);
+    spr.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
+    spr.setTextColor(C_WHITE, C_BG);
 
     // Position
-    tft.setTextSize(1);
-    tft.setCursor(4, 28);
+    spr.setTextSize(1);
+    spr.setCursor(4, 28);
     if (GPS_Utils::hasFix()) {
-        tft.setTextColor(C_ACCENT, C_BG);
-        tft.printf("%.5f  %.5f", GPS_Utils::lat(), GPS_Utils::lon());
-        tft.setTextColor(C_WHITE, C_BG);
-        tft.setCursor(4, 40);
-        tft.printf("Alt: %.0fm  Spd: %.1fkm/h  Cse: %.0f°",
+        spr.setTextColor(C_ACCENT, C_BG);
+        spr.printf("%.5f  %.5f", GPS_Utils::lat(), GPS_Utils::lon());
+        spr.setTextColor(C_WHITE, C_BG);
+        spr.setCursor(4, 40);
+        spr.printf("Alt: %.0fm  Spd: %.1fkm/h  Cse: %.0f°",
             GPS_Utils::altM(), GPS_Utils::speedKph(), GPS_Utils::courseDeg());
     } else {
-        tft.setTextColor(C_AMBER, C_BG);
-        tft.print("Acquiring GPS fix...");
+        spr.setTextColor(C_AMBER, C_BG);
+        spr.print("Acquiring GPS fix...");
     }
 
     // Divider
-    tft.drawFastHLine(0, 52, SCREEN_WIDTH, C_GREY);
+    spr.drawFastHLine(0, 52, SCREEN_WIDTH, C_GREY);
 
     // Last beacon
-    tft.setTextColor(C_GREEN, C_BG);
-    tft.setCursor(4, 56);
+    spr.setTextColor(C_GREEN, C_BG);
+    spr.setCursor(4, 56);
     uint32_t beaconAgo = (millis() - Beacon_Utils::lastMs()) / 1000;
-    tft.printf("Last TX: %lus ago   Beacons: %d", beaconAgo, (int)Beacon_Utils::getCount());
+    spr.printf("Last TX: %lus ago   Beacons: %d", beaconAgo, (int)Beacon_Utils::getCount());
 
     // LoRa stats
-    tft.setTextColor(C_PURPLE, C_BG);
-    tft.setCursor(4, 68);
-    tft.printf("LoRa RX: %d  TX: %d", (int)LoRa_Utils::getRxCount(), (int)LoRa_Utils::getTxCount());
+    spr.setTextColor(C_PURPLE, C_BG);
+    spr.setCursor(4, 68);
+    spr.printf("LoRa RX: %d  TX: %d", (int)LoRa_Utils::getRxCount(), (int)LoRa_Utils::getTxCount());
 
     // Symbol + comment
-    tft.setTextColor(C_WHITE, C_BG);
-    tft.setCursor(4, 80);
-    tft.printf("Symbol: %s  Path: %s", Config.aprs.symbol.c_str(), Config.aprs.path.c_str());
-    tft.setCursor(4, 92);
-    tft.print(Config.aprs.comment);
+    spr.setTextColor(C_WHITE, C_BG);
+    spr.setCursor(4, 80);
+    spr.printf("Symbol: %s  Path: %s", Config.aprs.symbol.c_str(), Config.aprs.path.c_str());
+    spr.setCursor(4, 92);
+    spr.print(Config.aprs.comment);
 
     // Region + TX status
-    tft.setCursor(4, 108);
-    tft.setTextColor(Config.region.txConfirmed ? C_GREEN : C_RED, C_BG);
-    tft.printf("Region: %s  TX:%s", Config.region.profileId.c_str(),
+    spr.setCursor(4, 108);
+    spr.setTextColor(Config.region.txConfirmed ? C_GREEN : C_RED, C_BG);
+    spr.printf("Region: %s  TX:%s", Config.region.profileId.c_str(),
         Config.region.txConfirmed ? "ON" : "OFF (disabled)");
 
     // Key hints
-    tft.setTextColor(C_GREY, C_BG);
-    tft.setCursor(4, SCREEN_HEIGHT - 12);
-    tft.print("S:Sts T:Stn M:Msg W:WiFi P:Prof B:Bcn");
+    spr.setTextColor(C_GREY, C_BG);
+    spr.setCursor(4, SCREEN_HEIGHT - 12);
+    spr.print("S:Sts T:Stn M:Msg W:WiFi P:Prof V:Sats B:Bcn");
 }
 static void drawStationList() {
-    tft.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
-    tft.setTextSize(1);
+    spr.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
+    spr.setTextSize(1);
 
     auto& stations = APRS_Utils::heardStations;
     if (stations.empty()) {
-        tft.setTextColor(C_GREY, C_BG);
-        tft.setCursor(10, 60);
-        tft.print("No stations heard yet.");
-        tft.setCursor(4, SCREEN_HEIGHT - 12);
-        tft.print("Home  |  S:Sts M:Msg W:WiFi P:Prof B:Bcn");
+        spr.setTextColor(C_GREY, C_BG);
+        spr.setCursor(10, 60);
+        spr.print("No stations heard yet.");
+        spr.setCursor(4, SCREEN_HEIGHT - 12);
+        spr.print("Home  |  S:Sts M:Msg W:WiFi P:Prof V:Sats B:Bcn");
         return;
     }
 
@@ -152,53 +160,53 @@ static void drawStationList() {
         int y = 22 + i * 18;
 
         // Row background alternating
-        tft.fillRect(0, y, SCREEN_WIDTH, 17, (i % 2 == 0) ? 0x2104 : C_BG);
+        spr.fillRect(0, y, SCREEN_WIDTH, 17, (i % 2 == 0) ? 0x2104 : C_BG);
 
         // Callsign
-        tft.setTextColor(C_ACCENT, (i % 2 == 0) ? 0x2104 : C_BG);
-        tft.setCursor(2, y + 5);
-        tft.print(s.callsign.length() > 10 ? s.callsign.substring(0,10) : s.callsign);
+        spr.setTextColor(C_ACCENT, (i % 2 == 0) ? 0x2104 : C_BG);
+        spr.setCursor(2, y + 5);
+        spr.print(s.callsign.length() > 10 ? s.callsign.substring(0,10) : s.callsign);
         // Distance / bearing (if we have GPS)
         if (GPS_Utils::hasFix() && s.lat != 0) {
             float dist = APRS_Utils::distanceKm(GPS_Utils::lat(), GPS_Utils::lon(), s.lat, s.lon);
             float bear = APRS_Utils::bearingDeg(GPS_Utils::lat(), GPS_Utils::lon(), s.lat, s.lon);
-            tft.setTextColor(C_WHITE, (i % 2 == 0) ? 0x2104 : C_BG);
-            tft.setCursor(100, y + 5);
-            if (dist < 1.0f) tft.printf("%.0fm", dist * 1000);
-            else             tft.printf("%.1fkm", dist);
-            tft.setCursor(150, y + 5);
-            tft.printf("%.0f°", bear);
+            spr.setTextColor(C_WHITE, (i % 2 == 0) ? 0x2104 : C_BG);
+            spr.setCursor(100, y + 5);
+            if (dist < 1.0f) spr.printf("%.0fm", dist * 1000);
+            else             spr.printf("%.1fkm", dist);
+            spr.setCursor(150, y + 5);
+            spr.printf("%.0f°", bear);
         }
 
         // Source (RF = yellow, INET = green) + RSSI
         bool viaRF = (s.via == HeardVia::RF);
-        tft.setTextColor(viaRF ? C_AMBER : C_GREEN, (i % 2 == 0) ? 0x2104 : C_BG);
-        tft.setCursor(190, y + 5);
-        tft.print(viaRF ? "RF" : "INT");
-        tft.setTextColor(C_WHITE, (i % 2 == 0) ? 0x2104 : C_BG);
-        tft.setCursor(213, y + 5);
-        if (s.everHeardRF) tft.printf("%.0fdB", s.rssi);
+        spr.setTextColor(viaRF ? C_AMBER : C_GREEN, (i % 2 == 0) ? 0x2104 : C_BG);
+        spr.setCursor(190, y + 5);
+        spr.print(viaRF ? "RF" : "INT");
+        spr.setTextColor(C_WHITE, (i % 2 == 0) ? 0x2104 : C_BG);
+        spr.setCursor(213, y + 5);
+        if (s.everHeardRF) spr.printf("%.0fdB", s.rssi);
 
         // Age
-        tft.setTextColor(C_GREY, (i % 2 == 0) ? 0x2104 : C_BG);
-        tft.setCursor(255, y + 5);
+        spr.setTextColor(C_GREY, (i % 2 == 0) ? 0x2104 : C_BG);
+        spr.setCursor(255, y + 5);
         uint32_t age = (millis() - s.lastHeardMs) / 1000;
-        if (age < 60) tft.printf("%ds", age);
-        else          tft.printf("%dm", age/60);
+        if (age < 60) spr.printf("%ds", age);
+        else          spr.printf("%dm", age/60);
 
         // Symbol hint
-        tft.setTextColor(C_PURPLE, (i % 2 == 0) ? 0x2104 : C_BG);
-        tft.setCursor(295, y + 5);
-        tft.print(s.symbol.length() > 0 ? s.symbol[1] : '?');
+        spr.setTextColor(C_PURPLE, (i % 2 == 0) ? 0x2104 : C_BG);
+        spr.setCursor(295, y + 5);
+        spr.print(s.symbol.length() > 0 ? s.symbol[1] : '?');
     }
 
-    tft.setTextColor(C_GREY, C_BG);
-    tft.setCursor(4, SCREEN_HEIGHT - 12);
-    tft.print("Home  |  S:Sts M:Msg W:WiFi P:Prof B:Bcn");
+    spr.setTextColor(C_GREY, C_BG);
+    spr.setCursor(4, SCREEN_HEIGHT - 12);
+    spr.print("Home  |  S:Sts M:Msg W:WiFi P:Prof V:Sats B:Bcn");
 }
 static void drawMessagesView() {
-    tft.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, Config.msg.bgColour);
-    tft.setTextSize(1);
+    spr.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, Config.msg.bgColour);
+    spr.setTextSize(1);
 
     // ── Chat bubbles (mirrors the website / Android app) ────────────────
     // Outgoing = right-aligned, Config.msg.outBubble.
@@ -236,18 +244,18 @@ static void drawMessagesView() {
         int x = m.outgoing ? (SCREEN_WIDTH - bubbleW - 4) : 4;
 
         // Bubble with rounded corners
-        tft.fillRoundRect(x, y, bubbleW, bubbleH, 4, bub);
+        spr.fillRoundRect(x, y, bubbleW, bubbleH, 4, bub);
         // Sender label above bubble (tiny)
-        tft.setTextColor(C_GREY, Config.msg.bgColour);
-        tft.setCursor(x + 2, y - 9);
+        spr.setTextColor(C_GREY, Config.msg.bgColour);
+        spr.setCursor(x + 2, y - 9);
         String who = m.outgoing ? ("me -> " + m.to) : m.from;
-        tft.print(who.substring(0, 20));
+        spr.print(who.substring(0, 20));
         // Bubble text
-        tft.setTextColor(txt, bub);
+        spr.setTextColor(txt, bub);
         int ty = y + PAD;
         for (auto& l : wrapped) {
-            tft.setCursor(x + PAD, ty);
-            tft.print(l);
+            spr.setCursor(x + PAD, ty);
+            spr.print(l);
             ty += LINEH;
         }
         y += bubbleH + 12;
@@ -255,25 +263,100 @@ static void drawMessagesView() {
     }
 
     if (hist.empty()) {
-        tft.setTextColor(C_GREY, Config.msg.bgColour);
-        tft.setCursor(10, 60);
-        tft.print("No messages yet.");
-        tft.setCursor(10, 74);
-        tft.print("Incoming messages set the reply target.");
+        spr.setTextColor(C_GREY, Config.msg.bgColour);
+        spr.setCursor(10, 60);
+        spr.print("No messages yet.");
+        spr.setCursor(10, 74);
+        spr.print("Incoming messages set the reply target.");
     }
     // Compose bar at the bottom
-    tft.fillRect(0, SCREEN_HEIGHT - 34, SCREEN_WIDTH, 34, 0x2104);
-    tft.drawFastHLine(0, SCREEN_HEIGHT - 34, SCREEN_WIDTH, C_ACCENT);
-    tft.setTextColor(C_AMBER, 0x2104);
-    tft.setCursor(2, SCREEN_HEIGHT - 28);
+    spr.fillRect(0, SCREEN_HEIGHT - 34, SCREEN_WIDTH, 34, 0x2104);
+    spr.drawFastHLine(0, SCREEN_HEIGHT - 34, SCREEN_WIDTH, C_ACCENT);
+    spr.setTextColor(C_AMBER, 0x2104);
+    spr.setCursor(2, SCREEN_HEIGHT - 28);
     String target = Messaging::getReplyTarget();
-    tft.print("To: " + (target.length() ? target : String("(none)")));
-    tft.setTextColor(C_WHITE, 0x2104);
-    tft.setCursor(2, SCREEN_HEIGHT - 14);
+    spr.print("To: " + (target.length() ? target : String("(none)")));
+    spr.setTextColor(C_WHITE, 0x2104);
+    spr.setCursor(2, SCREEN_HEIGHT - 14);
     String buf = Keyboard_Utils::getBuffer();
     // Show tail of buffer with cursor
     String view = buf.length() > 50 ? buf.substring(buf.length() - 50) : buf;
-    tft.print(view + "_");
+    spr.print(view + "_");
+}
+
+// Sky plot: a circle representing the horizon (edge) to zenith (centre),
+// with each tracked satellite placed by elevation (radius) and azimuth
+// (angle from north, clockwise), coloured by constellation. Elevation 90°
+// (overhead) plots at the centre; 0° (horizon) plots at the rim.
+static void drawSatsView() {
+    spr.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
+    spr.setTextSize(1);
+
+    const int cx = 80, cy = 130, R = 68;   // plot centre + radius (left side of screen)
+
+    // Horizon circle + elevation rings at 30°/60°
+    spr.drawCircle(cx, cy, R, C_GREY);
+    spr.drawCircle(cx, cy, R * 2 / 3, 0x2965);
+    spr.drawCircle(cx, cy, R / 3, 0x2965);
+    spr.drawFastHLine(cx - R, cy, R * 2, 0x2104);
+    spr.drawFastVLine(cx, cy - R, R * 2, 0x2104);
+    spr.setTextColor(C_GREY, C_BG);
+    spr.setCursor(cx - 3, cy - R - 10); spr.print("N");
+    spr.setCursor(cx - 3, cy + R + 2);  spr.print("S");
+    spr.setCursor(cx - R - 10, cy - 3); spr.print("W");
+    spr.setCursor(cx + R + 3, cy - 3);  spr.print("E");
+
+    auto& sats = Satellites_Utils::list();
+    for (auto& s : sats) {
+        float elevFrac = 1.0f - (s.elevation / 90.0f);   // 0 at zenith, 1 at horizon
+        float azRad = s.azimuth * DEG_TO_RAD;
+        int px = cx + (int)(R * elevFrac * sinf(azRad));
+        int py = cy - (int)(R * elevFrac * cosf(azRad));
+        uint16_t col = Satellites_Utils::constellationColour(s.constellation);
+        // Dim the dot if we're not actually receiving signal (SNR 0 = in
+        // view but not tracked well enough to use)
+        uint16_t dotCol = (s.snr > 0) ? col : C_GREY;
+        spr.fillCircle(px, py, 3, dotCol);
+        spr.setTextColor(col, C_BG);
+        spr.setCursor(px + 4, py - 3);
+        spr.print(s.prn);
+    }
+
+    // Constellation counts + total, right side of screen
+    int rx = 165, ry = 26;
+    spr.setTextColor(C_WHITE, C_BG);
+    spr.setCursor(rx, ry);
+    spr.printf("Satellites in view: %d", (int)sats.size());
+    ry += 14;
+    spr.setTextColor(C_ACCENT, C_BG);
+    spr.setCursor(rx, ry);
+    spr.printf("Used in fix: %d  HDOP: %.1f", GPS_Utils::sats(), GPS_Utils::hdop());
+    ry += 16;
+
+    const GnssConstellation kinds[] = {
+        GnssConstellation::GPS, GnssConstellation::GLONASS,
+        GnssConstellation::BEIDOU, GnssConstellation::QZSS
+    };
+    for (auto k : kinds) {
+        int n = Satellites_Utils::countByConstellation(k);
+        spr.setTextColor(Satellites_Utils::constellationColour(k), C_BG);
+        spr.fillCircle(rx + 4, ry + 4, 3, Satellites_Utils::constellationColour(k));
+        spr.setCursor(rx + 12, ry);
+        spr.printf("%-8s %d", Satellites_Utils::constellationName(k), n);
+        ry += 14;
+    }
+
+    ry += 6;
+    spr.setTextColor(C_GREY, C_BG);
+    spr.setCursor(rx, ry);
+    spr.print("Grey dot = in view,");
+    ry += 12;
+    spr.setCursor(rx, ry);
+    spr.print("no signal yet");
+
+    spr.setTextColor(C_GREY, C_BG);
+    spr.setCursor(4, SCREEN_HEIGHT - 12);
+    spr.print("Home  |  S:Sts T:Stn M:Msg W:WiFi P:Prof B:Bcn");
 }
 
 // ── Map view drawing primitives (used by map_utils.cpp) ─────────────────
@@ -353,6 +436,15 @@ void Display_Utils::setup() {
     ledcAttachPin(BOARD_TFT_BL, 0);
     ledcWrite(0, Config.display.brightness);
 
+    // Framebuffer for flicker-free redraws — see the spr declaration above.
+    // 320x240x16bpp = 150KB; TFT_eSPI auto-uses PSRAM for sprites on
+    // boards that have it (this one has 8MB), so this doesn't compete
+    // with internal RAM. If allocation somehow fails, spriteReady stays
+    // false and Display_Utils::loop() falls back to drawing tft directly.
+    spr.setColorDepth(16);
+    spriteReady = (spr.createSprite(SCREEN_WIDTH, SCREEN_HEIGHT) != nullptr);
+    if (!spriteReady) Serial.println("Display: sprite alloc failed, falling back to direct draw");
+
     // ── Boot splash: decode the embedded APRS BOOT JPEG ──────────────────
     TJpgDec.setJpgScale(1);
     TJpgDec.setSwapBytes(true);
@@ -382,23 +474,47 @@ void Display_Utils::loop() {
     lastRedrawMs = millis();
     // Map view redraws itself on its own (slower) cadence — tile decode
     // from SD is expensive, so it isn't worth doing every second like the
-    // text-only views. It still gets the status bar for consistency.
+    // text-only views. It still draws straight to tft (not the sprite);
+    // its 3s cadence isn't the once-a-second flicker this fixes, and
+    // adding a second full-screen PNG-decode-sized buffer isn't worth it
+    // here — this can be revisited if the map ever needs it too.
     if (currentView == VIEW_MAP) {
         static uint32_t lastMapDrawMs = 0;
-        drawStatusBar();
+        drawStatusBar();   // drawn into the sprite; push just that 20px strip
+        if (spriteReady) spr.pushSprite(0, 0, 0, 0, SCREEN_WIDTH, 20);
         if (millis() - lastMapDrawMs > 3000) {
             lastMapDrawMs = millis();
             Map_Utils::draw();
         }
         return;
     }
+
+    if (!spriteReady) {
+        // Sprite alloc failed at boot — fall back to the old direct-draw
+        // behaviour rather than silently doing nothing. This means the
+        // flicker returns, but the UI still works.
+        drawStatusBar();
+        switch (currentView) {
+            case VIEW_STATUS:   drawStatusView();   break;
+            case VIEW_STATIONS: drawStationList();  break;
+            case VIEW_MESSAGES: drawMessagesView(); break;
+            case VIEW_SATS:     drawSatsView();     break;
+            default: break;
+        }
+        return;
+    }
+
+    // Draw the whole frame into the off-screen sprite, then push it to the
+    // panel in one go — see the spr declaration/comment above for why.
     drawStatusBar();
     switch (currentView) {
         case VIEW_STATUS:   drawStatusView();   break;
         case VIEW_STATIONS: drawStationList();  break;
         case VIEW_MESSAGES: drawMessagesView(); break;
+        case VIEW_SATS:     drawSatsView();     break;
         default: break;
     }
+    spr.pushSprite(0, 0);
 }
 
 void Display_Utils::setView(DisplayView v)  { currentView = v; lastRedrawMs = 0; }

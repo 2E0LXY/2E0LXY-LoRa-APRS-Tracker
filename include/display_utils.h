@@ -13,7 +13,7 @@
 #define TFT_ORANGE  0xFBE0
 #define TFT_PURPLE  0x780F
 
-enum DisplayView { VIEW_STATUS, VIEW_STATIONS, VIEW_MESSAGES, VIEW_MAP };
+enum DisplayView { VIEW_STATUS, VIEW_STATIONS, VIEW_MESSAGES, VIEW_MAP, VIEW_SATS };
 
 namespace Display_Utils {
     void        setup();

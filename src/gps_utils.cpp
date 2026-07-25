@@ -3,7 +3,7 @@
 #include <TinyGPS++.h>
 #include "board_pins.h"
 
-static TinyGPSPlus gps;
+TinyGPSPlus gps;   // definition of the extern declared in gps_utils.h
 static HardwareSerial gpsSerial(1);
 
 GPSData gpsData;
@@ -17,6 +17,17 @@ void GPS_Utils::loop() {
     while (gpsSerial.available()) {
         gps.encode(gpsSerial.read());
     }
+    // Satellite count/HDOP update independently of location — these come
+    // from $GPGSV/$GPGGA sentences the module sends even with no fix yet,
+    // so gating them behind location.isUpdated() left the status bar
+    // stuck on "NO GPS 0 sats" indefinitely whenever a fix hadn't been
+    // acquired, even if satellites were already in view and counting up.
+    if (gps.satellites.isUpdated()) {
+        gpsData.sats = gps.satellites.value();
+    }
+    if (gps.hdop.isUpdated()) {
+        gpsData.hdop = gps.hdop.hdop();
+    }
     if (gps.location.isUpdated()) {
         gpsData.lat       = gps.location.lat();
         gpsData.lon       = gps.location.lng();
@@ -24,13 +35,11 @@ void GPS_Utils::loop() {
         gpsData.altM      = gps.altitude.meters();
         gpsData.speedKph  = gps.speed.kmph();
         gpsData.courseDeg = gps.course.deg();
-        gpsData.sats      = gps.satellites.value();
-        gpsData.hdop      = gps.hdop.hdop();
         gpsData.updatedMs = millis();
     }
 }
 
-bool GPS_Utils::hasFix()    { return gpsData.valid && gpsData.sats >= 3; }
+bool GPS_Utils::hasFix()    { return gpsData.valid; }
 float GPS_Utils::lat()      { return gpsData.lat; }
 float GPS_Utils::lon()      { return gpsData.lon; }
 float GPS_Utils::speedKph() { return gpsData.speedKph; }
