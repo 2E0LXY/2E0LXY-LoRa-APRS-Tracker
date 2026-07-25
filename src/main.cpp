@@ -37,6 +37,7 @@
 #include "ble_kiss.h"
 #include "audio_utils.h"
 #include "map_utils.h"
+#include "setup_view.h"
 
 // ── Forward declarations ──────────────────────────────────────────────────
 void handleKeyInput(char key);
@@ -71,6 +72,7 @@ void setup() {
 
     // Map (SD/tiles brought up on first draw, not at boot)
     Map_Utils::setup();
+    Setup_View::setup();
 
     // GPS
     GPS_Utils::setup();
@@ -213,7 +215,23 @@ void handleAPRSMessage(const String& from, const String& text, const String& msg
 // ── Keyboard navigation & input ───────────────────────────────────────────
 void handleKeyInput(char key) {
     bool inMessages = (Display_Utils::getView() == VIEW_MESSAGES);
+    bool inSetup    = (Display_Utils::getView() == VIEW_SETUP);
     bool isDelete = (key == '\b' || key == 0x08 || key == 0x7F);
+
+    // Setup screen: hand every key to Setup_View while active, same
+    // pattern as Messages compose mode below — it needs Delete to
+    // backspace inside a field being edited, not jump home, and letters
+    // typed into a field (like 's' in a WiFi SSID) shouldn't trigger
+    // navigation shortcuts. Only escape home when Delete is pressed
+    // outside of active editing.
+    if (inSetup) {
+        if (isDelete && !Setup_View::isEditing()) {
+            Display_Utils::setView(VIEW_STATIONS);
+            return;
+        }
+        Setup_View::handleKey(key);
+        return;
+    }
 
     // Delete/backspace outside compose mode always returns to the home
     // screen (Stations — callsigns heard). Inside Messages it backspaces
@@ -288,6 +306,7 @@ void handleKeyInput(char key) {
     if (key == '3' || key == 'm' || key == 'M') { Display_Utils::setView(VIEW_MESSAGES); return; }
     if (key == 'x' || key == 'X') { Display_Utils::setView(VIEW_MAP); return; }
     if (key == 'v' || key == 'V') { Display_Utils::setView(VIEW_SATS); return; }
+    if (key == 'c' || key == 'C') { Setup_View::enter(); Display_Utils::setView(VIEW_SETUP); return; }
     // Map pan/zoom — checked and consumed before any other letter binding
     // so it can't be shadowed by globals like 'w' (WiFi portal) or
     // 's'/'t'/'m' (view switches). Trackball isn't wired to firmware yet

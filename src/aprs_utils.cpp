@@ -3,12 +3,23 @@
 #include "gps_utils.h"
 #include "board_pins.h"
 #include <WiFi.h>
-#include <WiFiClient.h>
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
 
-static WiFiClient aprsClient;
+// APRS-IS over WebSocket (wss://www.aprsnet.uk/ws), not raw TCP:14580.
+// Raw APRS-IS TCP repeatedly failed to connect on the operator's network
+// even with DNS resolving correctly and a generous timeout, while this
+// same server's WebSocket endpoint (used by the website/desktop/Android
+// clients, all over port 443) and MQTT (port 1883) both worked fine from
+// the same device — strong evidence port 14580 specifically is blocked
+// by the network's router/firewall, not a server or firmware fault.
+// WebSocket rides on 443 (HTTPS), which is essentially never blocked.
+static WebSocketsClient ws;
 static bool       aprsConnected  = false;
+static bool       wsAuthAcked    = false;   // got auth_ack:success back yet?
 static uint32_t   lastConnectMs  = 0;
 static uint32_t   rxCount = 0, txCount = 0;
+static uint8_t    connectFailStreak = 0;   // consecutive failures — backs off the retry interval
 
 // Parsed received station
 StationList APRS_Utils::heardStations;
@@ -124,73 +135,137 @@ ParsedPacket APRS_Utils::parsePacket(const String& raw) {
     return p;
 }
 
-// ── APRS-IS TCP connection ────────────────────────────────────────────────
+// ── APRS-IS over WebSocket ─────────────────────────────────────────────────
+
+// Handles one full text frame from the server. Message shapes (from the
+// Go server's wsMessage struct): {"type":"auth_ack","status":"success"},
+// {"type":"rx","packet":"..."}, plus others we don't need here.
+static void handleWsText(const String& payload) {
+    JsonDocument doc;   // ArduinoJson v7 — no fixed capacity needed
+    if (deserializeJson(doc, payload) != DeserializationError::Ok) return;
+    const char* type = doc["type"] | "";
+
+    if (strcmp(type, "auth_ack") == 0) {
+        const char* status = doc["status"] | "";
+        if (strcmp(status, "success") == 0) {
+            wsAuthAcked = true;
+            Serial.println("APRS-IS (WS): authenticated");
+        } else {
+            Serial.println("APRS-IS (WS): auth failed — check callsign/passcode");
+            ws.disconnect();
+        }
+        return;
+    }
+
+    if (strcmp(type, "rx") == 0) {
+        const char* pkt = doc["packet"] | "";
+        if (!pkt || strlen(pkt) < 5) return;
+        rxCount++;
+        ParsedPacket p = APRS_Utils::parsePacket(String(pkt));
+        p.via = HeardVia::INET;
+        if (p.valid && p.hasPosition) {
+            APRS_Utils::updateStation(p.fromCall, p);
+        }
+        if (p.isMessage && p.toCall == fullCallsign()) {
+            APRS_Utils::onMessageReceived(p);
+        }
+    }
+}
+
+static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
+    switch (type) {
+        case WStype_CONNECTED: {
+            Serial.println("APRS-IS (WS): connected, authenticating...");
+            wsAuthAcked = false;
+            JsonDocument doc;
+            doc["type"] = "auth";
+            doc["callsign"] = fullCallsign();
+            doc["passcode"] = String(Config.aprs.passcode);
+            doc["software"] = "APRSNet-T-Deck " FW_VERSION;
+            String out;
+            serializeJson(doc, out);
+            ws.sendTXT(out);
+            aprsConnected = true;
+            connectFailStreak = 0;
+            break;
+        }
+        case WStype_DISCONNECTED:
+            Serial.println("APRS-IS (WS): disconnected");
+            aprsConnected = false;
+            wsAuthAcked = false;
+            break;
+        case WStype_TEXT:
+            handleWsText(String((char*)payload, length));
+            break;
+        case WStype_ERROR:
+            Serial.println("APRS-IS (WS): error");
+            break;
+        default:
+            break;
+    }
+}
 
 void APRS_Utils::connect() {
     if (!WiFi.isConnected() || !Config.beacon.aprsIsEnabled) return;
     if (aprsConnected) return;
     uint32_t now = millis();
-    if (now - lastConnectMs < 10000) return;
+    // Back off on repeated failures (10s, 20s, 40s... capped at 5 min)
+    // instead of hammering the server every 10s regardless.
+    uint32_t retryMs = 10000UL << min((int)connectFailStreak, 5);   // caps at 320s
+    if (now - lastConnectMs < retryMs) return;
     lastConnectMs = now;
 
-    Serial.printf("APRS-IS: connecting to %s:%d\n", APRSIS_HOST, APRSIS_PORT);
-    if (!aprsClient.connect(APRSIS_HOST, APRSIS_PORT)) {
-        Serial.println("APRS-IS: connection failed");
-        return;
-    }
-    aprsClient.setTimeout(50);  // never block the main loop on partial lines
-    // Login — "vers" identifies this client in aprsnet.uk's connected-clients
-    // list (SOFTWARE column), matching the existing "APRSNET Desktop" /
-    // "APRSNetAndroid 2.0" naming convention.
-    String login = "user " + fullCallsign()
-        + " pass " + String(Config.aprs.passcode)
-        + " vers APRSNet-T-Deck " FW_VERSION
-        + " filter m/50\r\n";
-    aprsClient.print(login);
-    aprsConnected = true;
-    Serial.println("APRS-IS: connected");
+    Serial.println("APRS-IS: connecting via WebSocket (wss://www.aprsnet.uk/ws)...");
+    ws.beginSSL("www.aprsnet.uk", 443, "/ws");
+    ws.onEvent(onWsEvent);
+    ws.setReconnectInterval(0);   // we drive reconnect ourselves via loop()/connect()
+    // WStype_CONNECTED above flips aprsConnected — begin() itself is
+    // async/non-blocking, so there's nothing further to check here.
 }
 
 void APRS_Utils::disconnect() {
-    aprsClient.stop();
+    ws.disconnect();
     aprsConnected = false;
+    wsAuthAcked = false;
 }
 
-bool APRS_Utils::isConnected() { return aprsConnected && aprsClient.connected(); }
+bool APRS_Utils::isConnected() { return ws.isConnected() && wsAuthAcked; }
 
 void APRS_Utils::loop() {
+    ws.loop();
+    // Use the library's own live socket state, not just our event-driven
+    // aprsConnected bool — a silent drop that never fires
+    // WStype_DISCONNECTED (seen in testing) left aprsConnected stuck true
+    // forever, so the status bar showed connected/green while nothing was
+    // actually flowing and no reconnect was ever attempted.
+    if (!ws.isConnected()) {
+        aprsConnected = false;
+        wsAuthAcked = false;
+    }
     if (!aprsConnected && WiFi.isConnected()) {
         connect();
-        return;
     }
-    if (!aprsClient.connected()) {
-        aprsConnected = false;
-        return;
-    }
-    // Read incoming packets
-    while (aprsClient.available()) {
-        String line = aprsClient.readStringUntil('\n');
-        line.trim();
-        if (line.startsWith("#")) continue; // server comment
-        if (line.length() < 5) continue;
-        rxCount++;
-        ParsedPacket p = parsePacket(line);
-        p.via = HeardVia::INET;
-        if (p.valid && p.hasPosition) {
-            updateStation(p.fromCall, p);
-        }
-        if (p.isMessage && p.toCall == fullCallsign()) {
-            onMessageReceived(p);
-        }
+
+    static uint32_t lastDbgMs = 0;
+    if (millis() - lastDbgMs > 10000) {
+        lastDbgMs = millis();
+        Serial.printf("APRS-IS (WS) debug: ws.isConnected=%d aprsConnected=%d wsAuthAcked=%d rx=%u\n",
+            ws.isConnected(), aprsConnected, wsAuthAcked, rxCount);
     }
 }
 
 bool APRS_Utils::sendPacketIS(const String& packet) {
     if (!isConnected()) return false;
-    aprsClient.println(packet);
+    JsonDocument doc;
+    doc["type"] = "tx";
+    doc["packet"] = packet;
+    String out;
+    serializeJson(doc, out);
+    ws.sendTXT(out);
     txCount++;
     return true;
 }
+
 
 // ── Station tracking ──────────────────────────────────────────────────────
 

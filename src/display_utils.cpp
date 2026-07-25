@@ -14,6 +14,7 @@
 #include "messaging.h"
 #include "map_utils.h"
 #include "satellites_utils.h"
+#include "setup_view.h"
 #include <algorithm>
 #include <vector>
 
@@ -132,7 +133,7 @@ static void drawStatusView() {
     // Key hints
     spr.setTextColor(C_GREY, C_BG);
     spr.setCursor(4, SCREEN_HEIGHT - 12);
-    spr.print("S:Sts T:Stn M:Msg W:WiFi P:Prof V:Sats B:Bcn");
+    spr.print("S:Sts T:Stn M:Msg W:WiFi P:Prof C:Cfg B:Bcn");
 }
 static void drawStationList() {
     spr.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
@@ -359,6 +360,58 @@ static void drawSatsView() {
     spr.print("Home  |  S:Sts T:Stn M:Msg W:WiFi P:Prof B:Bcn");
 }
 
+// On-device setup: a scrollable field list, one row per setting. The
+// selected row is highlighted; Enter opens it for text entry (or flips a
+// toggle immediately) and Enter again confirms and saves. Logic/state
+// lives in setup_view.cpp — this just renders whatever it reports.
+static void drawSetupView() {
+    spr.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
+    spr.setTextSize(1);
+
+    spr.setTextColor(C_ACCENT, C_BG);
+    spr.setCursor(4, 26);
+    spr.print("On-Device Setup");
+    spr.drawFastHLine(0, 38, SCREEN_WIDTH, C_GREY);
+
+    auto& fields = Setup_View::fields();
+    int sel = Setup_View::selectedIndex();
+    bool editing = Setup_View::isEditing();
+    int y = 44;
+    for (size_t i = 0; i < fields.size(); i++) {
+        bool isSel = ((int)i == sel);
+        uint16_t rowBg = isSel ? 0x2965 : C_BG;
+        spr.fillRect(0, y, SCREEN_WIDTH, 20, rowBg);
+        spr.setTextColor(isSel ? C_WHITE : C_GREY, rowBg);
+        spr.setCursor(4, y + 6);
+        spr.print(fields[i].label);
+
+        String shown = fields[i].value;
+        if (fields[i].type == FieldType::PASSWORD && shown.length() > 0) {
+            shown = "";
+            for (size_t c = 0; c < fields[i].value.length(); c++) shown += '*';
+        }
+        if (isSel && editing) {
+            shown = Setup_View::editBuffer();
+            if (fields[i].type == FieldType::PASSWORD) {
+                String masked = "";
+                for (size_t c = 0; c < shown.length(); c++) masked += '*';
+                shown = masked;
+            }
+            shown += "_";   // cursor
+        }
+        spr.setTextColor(isSel ? C_ACCENT : C_WHITE, rowBg);
+        spr.setCursor(170, y + 6);
+        spr.print(shown);
+        y += 20;
+        if (y > SCREEN_HEIGHT - 26) break;
+    }
+
+    spr.setTextColor(C_GREY, C_BG);
+    spr.setCursor(4, SCREEN_HEIGHT - 12);
+    if (editing) spr.print("Enter:Save  Del:Backspace");
+    else         spr.print("I/O:Up/Down  Enter:Edit  Home  |  S:Sts");
+}
+
 // ── Map view drawing primitives (used by map_utils.cpp) ─────────────────
 // Kept narrow and TFT-object-private so map_utils.cpp doesn't need direct
 // TFT_eSPI access — mirrors how the other views only ever touch `tft`
@@ -499,6 +552,7 @@ void Display_Utils::loop() {
             case VIEW_STATIONS: drawStationList();  break;
             case VIEW_MESSAGES: drawMessagesView(); break;
             case VIEW_SATS:     drawSatsView();     break;
+            case VIEW_SETUP:    drawSetupView();    break;
             default: break;
         }
         return;
@@ -512,6 +566,7 @@ void Display_Utils::loop() {
         case VIEW_STATIONS: drawStationList();  break;
         case VIEW_MESSAGES: drawMessagesView(); break;
         case VIEW_SATS:     drawSatsView();     break;
+        case VIEW_SETUP:    drawSetupView();    break;
         default: break;
     }
     spr.pushSprite(0, 0);
