@@ -3,20 +3,35 @@
 #include "gps_utils.h"
 #include "board_pins.h"
 #include <WiFi.h>
+#include <WiFiClient.h>
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
 
-// APRS-IS over WebSocket (wss://www.aprsnet.uk/ws), not raw TCP:14580.
-// Raw APRS-IS TCP repeatedly failed to connect on the operator's network
-// even with DNS resolving correctly and a generous timeout, while this
-// same server's WebSocket endpoint (used by the website/desktop/Android
-// clients, all over port 443) and MQTT (port 1883) both worked fine from
-// the same device — strong evidence port 14580 specifically is blocked
-// by the network's router/firewall, not a server or firmware fault.
-// WebSocket rides on 443 (HTTPS), which is essentially never blocked.
+// APRS-IS transport — picks WebSocket or raw TCP based on the configured
+// server (Config.region.aprsIsServer), not hardcoded to one or the other.
+//
+// aprsnet.uk speaks a JSON-over-WebSocket protocol (wss://.../ws) that is
+// specific to that server's own Go implementation — no other APRS-IS
+// server on the network (euro.aprs2.net, noam.aprs2.net, etc.) implements
+// it. Those all speak the standard plain-text APRS-IS protocol over raw
+// TCP on port 14580, which is the only transport that works with them.
+//
+// aprsnet.uk defaults to the WebSocket path because, on the operator's
+// own network, raw TCP:14580 repeatedly failed to connect (DNS resolved
+// fine, generous timeout, yet every connect attempt failed) while this
+// same server's WebSocket endpoint — the same one the website/desktop/
+// Android clients already use, over port 443 — connected without issue.
+// That strongly suggested the operator's router/firewall blocks 14580
+// specifically; WebSocket rides on 443 (HTTPS), which is essentially
+// never blocked. Someone on a different network / different server
+// doesn't have that problem and doesn't have a WebSocket endpoint to use
+// anyway, so raw TCP is exactly right for them.
+static bool usingWebSocket = true;   // decided fresh each connect() from Config.region.aprsIsServer
+
 static WebSocketsClient ws;
+static WiFiClient       tcp;
 static bool       aprsConnected  = false;
-static bool       wsAuthAcked    = false;   // got auth_ack:success back yet?
+static bool       wsAuthAcked    = false;   // WebSocket path only: got auth_ack:success back yet?
 static uint32_t   lastConnectMs  = 0;
 static uint32_t   rxCount = 0, txCount = 0;
 static uint8_t    connectFailStreak = 0;   // consecutive failures — backs off the retry interval
@@ -99,7 +114,15 @@ ParsedPacket APRS_Utils::parsePacket(const String& raw) {
             // check misidentifies compressed packets whose table char
             // happens to be numeric).
             bool uncompressedOk = false;
-            if (pos + 19 < (int)info.length()) {
+            // Need to safely read up to index pos+18 (sym2, the last
+            // character of the fixed 19-byte block) — that requires
+            // length > pos+18, i.e. pos+18 < length. The previous
+            // `pos + 19 < length` was off by one: it rejected packets
+            // whose info field was exactly long enough (no comment text
+            // after the position), falling through to the compressed
+            // path and decoding a Base91 misread as a wildly wrong
+            // coordinate instead of the correct uncompressed one.
+            if (pos + 18 < (int)info.length()) {
                 auto isDigit = [](char c){ return c >= '0' && c <= '9'; };
                 String latStr = info.substring(pos, pos + 8);
                 char sym1 = info[pos + 8];
@@ -254,6 +277,24 @@ static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
     }
 }
 
+// Parses one line of standard plain-text APRS-IS traffic (raw TCP path).
+// Server comment lines start with '#' (including the login ack line) and
+// are ignored; everything else is a packet.
+static void handleTcpLine(const String& lineIn) {
+    String line = lineIn;
+    line.trim();
+    if (line.length() == 0 || line.startsWith("#")) return;
+    rxCount++;
+    ParsedPacket p = APRS_Utils::parsePacket(line);
+    p.via = HeardVia::INET;
+    if (p.valid && p.hasPosition) {
+        APRS_Utils::updateStation(p.fromCall, p);
+    }
+    if (p.isMessage && p.toCall == fullCallsign()) {
+        APRS_Utils::onMessageReceived(p);
+    }
+}
+
 void APRS_Utils::connect() {
     if (!WiFi.isConnected() || !Config.beacon.aprsIsEnabled) return;
     if (aprsConnected) return;
@@ -264,61 +305,121 @@ void APRS_Utils::connect() {
     if (now - lastConnectMs < retryMs) return;
     lastConnectMs = now;
 
-    Serial.println("APRS-IS: connecting via WebSocket (wss://www.aprsnet.uk/ws)...");
-    ws.beginSSL("www.aprsnet.uk", 443, "/ws");
-    ws.onEvent(onWsEvent);
-    ws.setReconnectInterval(0);   // we drive reconnect ourselves via loop()/connect()
-    // WStype_CONNECTED above flips aprsConnected — begin() itself is
-    // async/non-blocking, so there's nothing further to check here.
+    usingWebSocket = Config.region.aprsIsServer.equalsIgnoreCase("www.aprsnet.uk")
+                   || Config.region.aprsIsServer.equalsIgnoreCase("aprsnet.uk");
+
+    if (usingWebSocket) {
+        Serial.println("APRS-IS: connecting via WebSocket (wss://www.aprsnet.uk/ws)...");
+        ws.beginSSL("www.aprsnet.uk", 443, "/ws");
+        ws.onEvent(onWsEvent);
+        ws.setReconnectInterval(0);   // we drive reconnect ourselves via loop()/connect()
+        // WStype_CONNECTED above flips aprsConnected — begin() itself is
+        // async/non-blocking, so there's nothing further to check here.
+        return;
+    }
+
+    // Raw TCP path — standard APRS-IS login line, used for any server
+    // other than aprsnet.uk (see the file-level comment for why).
+    const String host = Config.region.aprsIsServer;
+    const int    port = Config.region.aprsIsPort;
+    Serial.printf("APRS-IS: connecting via TCP to %s:%d...\n", host.c_str(), port);
+    tcp.setTimeout(8);
+    if (!tcp.connect(host.c_str(), port)) {
+        Serial.println("APRS-IS: TCP connect failed");
+        connectFailStreak = min(connectFailStreak + 1, 5);
+        return;
+    }
+    tcp.setTimeout(50);   // never block the main loop on partial lines
+    String login = "user " + fullCallsign()
+        + " pass " + String(Config.aprs.passcode)
+        + " vers APRSNet-T-Deck " FW_VERSION
+        + " filter m/50\r\n";
+    tcp.print(login);
+    aprsConnected = true;
+    connectFailStreak = 0;
+    Serial.println("APRS-IS: connected (TCP)");
 }
 
 void APRS_Utils::disconnect() {
-    ws.disconnect();
+    if (usingWebSocket) {
+        ws.disconnect();
+        wsAuthAcked = false;
+    } else {
+        tcp.stop();
+    }
     aprsConnected = false;
-    wsAuthAcked = false;
 }
 
-bool APRS_Utils::isConnected() { return ws.isConnected() && wsAuthAcked; }
+bool APRS_Utils::isConnected() {
+    return usingWebSocket ? (ws.isConnected() && wsAuthAcked)
+                           : (aprsConnected && tcp.connected());
+}
 
 void APRS_Utils::loop() {
-    ws.loop();
-    // Use the library's own live socket state, not just our event-driven
-    // aprsConnected bool — a silent drop that never fires
-    // WStype_DISCONNECTED (seen in testing) left aprsConnected stuck true
-    // forever, so the status bar showed connected/green while nothing was
-    // actually flowing and no reconnect was ever attempted.
-    if (!ws.isConnected()) {
-        aprsConnected = false;
-        wsAuthAcked = false;
-    }
-    if (!aprsConnected && WiFi.isConnected()) {
-        connect();
+    if (usingWebSocket) {
+        ws.loop();
+        // Use the library's own live socket state, not just our event-
+        // driven aprsConnected bool — a silent drop that never fires
+        // WStype_DISCONNECTED (seen in testing) left aprsConnected stuck
+        // true forever, so the status bar showed connected/green while
+        // nothing was actually flowing and no reconnect was attempted.
+        if (!ws.isConnected()) {
+            aprsConnected = false;
+            wsAuthAcked = false;
+        }
+    } else if (aprsConnected) {
+        if (!tcp.connected()) {
+            aprsConnected = false;
+        } else {
+            while (tcp.available()) {
+                handleTcpLine(tcp.readStringUntil('\n'));
+            }
+        }
     }
 
-    static uint32_t lastDbgMs = 0;
-    if (millis() - lastDbgMs > 10000) {
-        lastDbgMs = millis();
-        Serial.printf("APRS-IS (WS) debug: ws.isConnected=%d aprsConnected=%d wsAuthAcked=%d rx=%u\n",
-            ws.isConnected(), aprsConnected, wsAuthAcked, rxCount);
+    if (!aprsConnected && WiFi.isConnected()) {
+        connect();
     }
 }
 
 bool APRS_Utils::sendPacketIS(const String& packet) {
     if (!isConnected()) return false;
-    JsonDocument doc;
-    doc["type"] = "tx";
-    doc["packet"] = packet;
-    String out;
-    serializeJson(doc, out);
-    ws.sendTXT(out);
+    if (usingWebSocket) {
+        JsonDocument doc;
+        doc["type"] = "tx";
+        doc["packet"] = packet;
+        String out;
+        serializeJson(doc, out);
+        ws.sendTXT(out);
+    } else {
+        tcp.println(packet);
+    }
     txCount++;
     return true;
 }
 
 
+
 // ── Station tracking ──────────────────────────────────────────────────────
 
 void APRS_Utils::updateStation(const String& call, const ParsedPacket& p) {
+    // Sanity-reject implausible positions rather than trust every decode.
+    // Some compressed-position packets on the network don't match the
+    // standard byte layout closely enough for our decoder (or any other
+    // simple one) to get right every time — seen in testing producing a
+    // technically in-range but wildly wrong coordinate (e.g. Siberia for
+    // a Cambridgeshire station) rather than failing cleanly. Once we have
+    // our own GPS fix, anything more than ~2000km away is far more likely
+    // a bad decode than a real DX contact for this local UK LoRa network,
+    // so drop it instead of showing a garbage location.
+    if (GPS_Utils::hasFix() && (p.lat != 0 || p.lon != 0)) {
+        float dist = distanceKm(GPS_Utils::lat(), GPS_Utils::lon(), p.lat, p.lon);
+        if (dist > 2000.0f) {
+            Serial.printf("Station update rejected (implausible position): %s at %.4f,%.4f (%.0fkm away)\n",
+                call.c_str(), p.lat, p.lon, dist);
+            return;
+        }
+    }
     for (auto& s : heardStations) {
         if (s.callsign.equalsIgnoreCase(call)) {
             s.lat = p.lat; s.lon = p.lon;

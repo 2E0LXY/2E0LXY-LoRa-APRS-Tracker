@@ -115,6 +115,8 @@ struct RegionConfig {
     String  profileId       = "uk";     // matches a RegionalProfile id
     bool    txConfirmed     = false;    // TX disabled until operator confirms
     String  timezone        = "GMT0BST,M3.5.0/1,M10.5.0/2";
+    String  aprsIsServer    = "www.aprsnet.uk";
+    int     aprsIsPort      = 14580;
 };
 
 // ── Root config ──────────────────────────────────────────────────────────

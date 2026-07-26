@@ -2,7 +2,7 @@
 // LilyGO T-Deck Plus — hardware pin assignments
 
 // ── Firmware version (single source of truth) ───────────────────────────
-#define FW_VERSION "1.5.0"
+#define FW_VERSION "1.6.0"
 // Source: Xinyuan-LilyGO/T-Deck utilities.h
 
 // ── Power ────────────────────────────────────────────────────────────────

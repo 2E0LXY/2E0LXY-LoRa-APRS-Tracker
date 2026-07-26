@@ -1,13 +1,16 @@
 #include "setup_view.h"
 #include "configuration.h"
 #include "display_utils.h"
+#include "board_pins.h"
+#include <TFT_eSPI.h>
+#include <SD.h>
 
 namespace {
     // Indices into fields() with fixed meaning, so handleKey() knows what
     // to write back to Config on confirm without string-matching labels.
     enum FieldIndex {
         F_CALLSIGN, F_SSID, F_WIFI_SSID, F_WIFI_PASS,
-        F_TX_ENABLED, F_AUDIO_ENABLED, F_AUDIO_VOLUME,
+        F_TX_ENABLED, F_AUDIO_ENABLED, F_AUDIO_VOLUME, F_FORMAT_SD,
         F_COUNT
     };
 
@@ -15,6 +18,7 @@ namespace {
     int  selected = 0;
     bool editing = false;
     String editBuf;
+    bool formatArmed = false;   // first Enter arms it, second confirms — avoids a stray keypress wiping the card
 
     void syncFromConfig() {
         fieldList.clear();
@@ -25,6 +29,26 @@ namespace {
         fieldList.push_back({"TX Enabled",   FieldType::TOGGLE,   Config.region.txConfirmed ? "ON" : "OFF"});
         fieldList.push_back({"Message Sound",FieldType::TOGGLE,   Config.audio.enabled ? "ON" : "OFF"});
         fieldList.push_back({"Sound Volume", FieldType::NUMBER,   String(Config.audio.volume)});
+        fieldList.push_back({"Format SD Card", FieldType::ACTION,
+            formatArmed ? "Press Enter again to confirm" : "Enter: create folders"});
+    }
+
+    // Creates the folder structure the map view expects (/map). Safe to
+    // run repeatedly — SD.mkdir() on an existing folder is a no-op, this
+    // never deletes anything already on the card (despite the "Format"
+    // label, which matches what the person is likely thinking of doing —
+    // getting a card ready for tiles — without this actually being a
+    // destructive wipe).
+    void formatSdCard() {
+        bool sdOk = SD.begin(BOARD_SD_CS, TFT_eSPI::getSPIinstance(), 20000000);
+        if (!sdOk) {
+            Display_Utils::showMessage("SD Card", "No card found", TFT_RED);
+            return;
+        }
+        bool mapOk = SD.exists("/map") || SD.mkdir("/map");
+        Display_Utils::showMessage("SD Card",
+            mapOk ? "Folders ready: /map" : "Failed to create /map",
+            mapOk ? TFT_GREEN : TFT_RED);
     }
 
     void writeBack(int idx, const String& val) {
@@ -46,7 +70,7 @@ namespace {
                 Config.audio.volume = constrain(n, 0, 100);
                 break;
             }
-            default: break;   // toggles handled directly in handleKey(), not via text entry
+            default: break;   // toggles/actions handled directly in handleKey(), not via text entry
         }
         saveConfig();
         syncFromConfig();
@@ -58,6 +82,7 @@ void Setup_View::setup() {
 }
 
 void Setup_View::enter() {
+    formatArmed = false;
     syncFromConfig();
     selected = 0;
     editing = false;
@@ -93,8 +118,16 @@ void Setup_View::handleKey(char key) {
     }
 
     // Not editing: navigate or toggle/enter-edit
-    if (isUp)   { selected = (selected - 1 + F_COUNT) % F_COUNT; return; }
-    if (isDown) { selected = (selected + 1) % F_COUNT; return; }
+    if (isUp)   {
+        selected = (selected - 1 + F_COUNT) % F_COUNT;
+        if (formatArmed) { formatArmed = false; syncFromConfig(); }   // moving away disarms
+        return;
+    }
+    if (isDown) {
+        selected = (selected + 1) % F_COUNT;
+        if (formatArmed) { formatArmed = false; syncFromConfig(); }
+        return;
+    }
 
     if (isEnter) {
         auto& f = fieldList[selected];
@@ -106,6 +139,17 @@ void Setup_View::handleKey(char key) {
             }
             saveConfig();
             syncFromConfig();
+        } else if (f.type == FieldType::ACTION) {
+            if (selected == F_FORMAT_SD) {
+                if (!formatArmed) {
+                    formatArmed = true;
+                    syncFromConfig();
+                } else {
+                    formatArmed = false;
+                    formatSdCard();
+                    syncFromConfig();
+                }
+            }
         } else {
             editing = true;
             editBuf = (f.type == FieldType::PASSWORD) ? "" : f.value;   // don't prefill a password for editing-in-place surprise

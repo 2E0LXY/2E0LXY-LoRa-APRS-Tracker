@@ -57,6 +57,10 @@ static String buildPage() {
     h += "<div><label>Bandwidth (kHz)</label><input name='bw' type='number' step='0.1' value='" + String(Config.lora.bw, 1) + "'></div>";
     h += "<div><label>Coding Rate (4/x)</label><input name='cr' type='number' min='5' max='8' value='" + String(Config.lora.cr) + "'></div></div>";
 
+    h += "<div class='row'><div><label>APRS-IS Server</label><input name='is_server' value='" + Config.region.aprsIsServer + "'></div>";
+    h += "<div><label>APRS-IS Port</label><input name='is_port' type='number' value='" + String(Config.region.aprsIsPort) + "'></div></div>";
+    h += F("<small>aprsnet.uk connects over WebSocket (port 443) automatically. Any other server (e.g. euro.aprs2.net, noam.aprs2.net) connects over standard APRS-IS TCP on the port above.</small>");
+
     h += "<label><input type='checkbox' name='tx_ok' " + String(Config.region.txConfirmed ? "checked" : "") + "> I confirm this frequency &amp; power are legal for my licence and region — enable TX</label>";
     if (!Config.region.txConfirmed) h += F("<div class='warn'>&#9888; TX is currently DISABLED. Tick the box above to enable transmitting.</div>");
 
@@ -130,7 +134,7 @@ static String buildPage() {
     h += "[";
     for (int i = 0; i < REGIONAL_PROFILE_COUNT; i++) {
         auto& p = REGIONAL_PROFILES[i];
-        h += "{id:'" + String(p.id) + "',f:" + String(p.freqMHz,4) + ",sf:" + String(p.sf) + ",bw:" + String(p.bwKHz,1) + ",cr:" + String(p.cr) + ",pw:" + String(p.powerDbm) + ",path:'" + String(p.beaconPath) + "'}";
+        h += "{id:'" + String(p.id) + "',f:" + String(p.freqMHz,4) + ",sf:" + String(p.sf) + ",bw:" + String(p.bwKHz,1) + ",cr:" + String(p.cr) + ",pw:" + String(p.powerDbm) + ",path:'" + String(p.beaconPath) + "',srv:'" + String(p.aprsIsServer) + "',prt:" + String(p.aprsIsPort) + "}";
         if (i < REGIONAL_PROFILE_COUNT - 1) h += ",";
     }
     h += F("];function regionChanged(id){var p=P.find(x=>x.id==id);if(!p)return;"
@@ -139,6 +143,8 @@ static String buildPage() {
         "document.querySelector('[name=bw]').value=p.bw;"
         "document.querySelector('[name=cr]').value=p.cr;"
         "document.querySelector('[name=power]').value=p.pw;"
+        "document.querySelector('[name=is_server]').value=p.srv;"
+        "document.querySelector('[name=is_port]').value=p.prt;"
         "document.querySelector('[name=path]').value=p.path;"
         "document.querySelector('[name=tx_ok]').checked=false;}"
         "function scanWifi(){"
@@ -194,6 +200,8 @@ static void handleSave() {
     Config.lora.sf       = arg("sf").toInt();
     Config.lora.bw       = arg("bw").toFloat();
     Config.lora.cr       = arg("cr").toInt();
+    Config.region.aprsIsServer = arg("is_server");
+    Config.region.aprsIsPort   = arg("is_port").toInt();
     Config.region.txConfirmed = has("tx_ok");
 
     Config.beacon.smartEnabled   = has("smart");

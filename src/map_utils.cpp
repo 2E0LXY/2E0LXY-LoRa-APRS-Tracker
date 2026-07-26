@@ -86,7 +86,11 @@ namespace {
     // Draws one 256x256 tile at screen (x,y), clipping to the map area.
     void drawTile(int z, int tx, int ty, int x, int y) {
         char path[48];
-        snprintf(path, sizeof(path), "/tiles/%d/%d/%d.png", z, tx, ty);
+        // Matches the aprsnet.uk website's Map Downloader "Flat Root"
+        // layout exactly — it extracts to /map/{z}/{x}/{y}.png at the SD
+        // card root, not /tiles/... (that mismatch previously meant every
+        // tile lookup missed even with correctly-placed files on the card).
+        snprintf(path, sizeof(path), "/map/%d/%d/%d.png", z, tx, ty);
         if (!SD.exists(path)) return;   // not cached — leave background showing
         drawOriginX = x;
         drawOriginY = y;
@@ -122,12 +126,24 @@ void Map_Utils::draw() {
     }
 
     // Bring up SD (shared SPI bus) — cheap no-op if already begun.
+    // Uses TFT_eSPI's own SPI instance, same as LoRa (see lora_utils.cpp)
+    // — NOT the global SPI object, which is never begin()'d anywhere in
+    // this firmware and so SD.begin() with it always failed silently.
     static bool sdReady = false;
     if (!sdReady) {
-        sdReady = SD.begin(BOARD_SD_CS, SPI, 20000000);
+        sdReady = SD.begin(BOARD_SD_CS, TFT_eSPI::getSPIinstance(), 20000000);
+        Serial.printf("Map: SD.begin() = %d\n", sdReady);
         if (!sdReady) {
             Display_Utils::mapDrawNoCard();
             return;
+        }
+        // Create the /map folder on first mount if it isn't there yet, so
+        // a freshly-formatted or blank card is immediately ready to
+        // receive tiles from a card reader — no need to manually create
+        // the right folder name/case beforehand.
+        if (!SD.exists("/map")) {
+            bool created = SD.mkdir("/map");
+            Serial.printf("Map: created /map folder = %d\n", created);
         }
     }
 

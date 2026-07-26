@@ -400,6 +400,9 @@ static void drawSetupView() {
             shown += "_";   // cursor
         }
         spr.setTextColor(isSel ? C_ACCENT : C_WHITE, rowBg);
+        if (fields[i].type == FieldType::ACTION && fields[i].value.startsWith("Press Enter again")) {
+            spr.setTextColor(C_AMBER, rowBg);   // armed — needs a second Enter, make that stand out
+        }
         spr.setCursor(170, y + 6);
         spr.print(shown);
         y += 20;
@@ -443,7 +446,7 @@ void Display_Utils::mapDrawFooter(int y, int zoomLevel) {
     tft.fillRect(0, y, SCREEN_WIDTH, SCREEN_HEIGHT - y, C_STATUS);
     tft.setTextColor(C_WHITE, C_STATUS);
     tft.setCursor(4, y + 3);
-    tft.printf("Zoom %d  |  Home  |  +/- zoom  Trackball pan", zoomLevel);
+    tft.printf("Zoom %d  I/O:+/-  ,./;':pan  G:GPS  Home", zoomLevel);
 }
 
 void Display_Utils::mapDrawNoCard() {
@@ -454,9 +457,9 @@ void Display_Utils::mapDrawNoCard() {
     tft.setCursor(20, 96);
     tft.println("Use the Map Downloader on");
     tft.setCursor(20, 110);
-    tft.println("aprsnet.uk, then USB mode (U)");
+    tft.println("aprsnet.uk, then copy tiles to");
     tft.setCursor(20, 124);
-    tft.println("to copy tiles to the card.");
+    tft.println("the SD card via a card reader.");
 }
 
 // ── Battery ───────────────────────────────────────────────────────────────

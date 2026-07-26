@@ -77,6 +77,8 @@ bool loadConfig() {
     Config.region.profileId   = doc["region"]["profile"]  | "uk";
     Config.region.txConfirmed = doc["region"]["tx_ok"]    | false;
     Config.region.timezone    = doc["region"]["tz"]       | "GMT0BST,M3.5.0/1,M10.5.0/2";
+    Config.region.aprsIsServer = doc["region"]["is_server"] | "www.aprsnet.uk";
+    Config.region.aprsIsPort   = doc["region"]["is_port"]   | 14580;
 
     Config.weather.enabled    = doc["weather"]["enabled"]  | false;
     Config.weather.txWx       = doc["weather"]["tx"]       | false;
@@ -165,6 +167,8 @@ bool saveConfig() {
     doc["region"]["profile"] = Config.region.profileId;
     doc["region"]["tx_ok"]   = Config.region.txConfirmed;
     doc["region"]["tz"]      = Config.region.timezone;
+    doc["region"]["is_server"] = Config.region.aprsIsServer;
+    doc["region"]["is_port"]   = Config.region.aprsIsPort;
 
     doc["weather"]["enabled"]  = Config.weather.enabled;
     doc["weather"]["tx"]       = Config.weather.txWx;
@@ -221,13 +225,19 @@ bool applyRegionProfile(const String& id) {
 
     Config.aprs.path     = p->beaconPath;
 
-    // Only overwrite the server if it's still the default aprsnet.uk or empty,
-    // so a user who set a custom server isn't clobbered when tweaking regions.
-    // (Custom profile leaves everything user-editable.)
-    if (String(p->id) != "custom") {
-        // Note: APRS-IS host is compiled default; regional server preference
-        // is surfaced in the web UI. We keep the aprsnet.uk default unless the
-        // user explicitly changes it, matching the iGate behaviour.
+    // Apply the profile's APRS-IS server/port unless the operator has
+    // moved off the default onto a custom one — matches the pattern used
+    // for every other field this function sets, and is what actually
+    // lets picking a non-UK region connect somewhere reachable: only
+    // aprsnet.uk speaks this firmware's WebSocket transport (see
+    // aprs_utils.cpp), so any other server needs the raw TCP:14580 path,
+    // which the connection layer now picks automatically based on this
+    // field rather than always assuming aprsnet.uk.
+    bool onDefaultServer = Config.region.aprsIsServer == "www.aprsnet.uk"
+                         || Config.region.aprsIsServer.length() == 0;
+    if (String(p->id) != "custom" && onDefaultServer) {
+        Config.region.aprsIsServer = p->aprsIsServer;
+        Config.region.aprsIsPort   = p->aprsIsPort;
     }
 
     // Changing region disables TX until the operator confirms.

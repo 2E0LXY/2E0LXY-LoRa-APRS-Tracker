@@ -14,7 +14,7 @@
 // other draw*View functions) reads that state to render it — this keeps
 // the TFT_eSPI/sprite object private to display_utils.cpp, matching how
 // every other view is structured.
-enum class FieldType { TEXT, PASSWORD, TOGGLE, NUMBER };
+enum class FieldType { TEXT, PASSWORD, TOGGLE, NUMBER, ACTION };
 
 struct SetupField {
     String     label;
