@@ -13,7 +13,7 @@
 #define TFT_ORANGE  0xFBE0
 #define TFT_PURPLE  0x780F
 
-enum DisplayView { VIEW_STATUS, VIEW_STATIONS, VIEW_MESSAGES, VIEW_MAP, VIEW_SATS, VIEW_SETUP };
+enum DisplayView { VIEW_HOME, VIEW_STATUS, VIEW_STATIONS, VIEW_MESSAGES, VIEW_MAP, VIEW_SATS, VIEW_SETUP };
 
 namespace Display_Utils {
     void        setup();
@@ -24,6 +24,18 @@ namespace Display_Utils {
     void        showMessage(const String& title, const String& body, uint16_t colour = 0x07FF);
     float       batteryVolts();
     int         batteryPercent();
+
+    // ── Home screen (icon grid) navigation ────────────────────────────
+    // Called from main.cpp's key handler when VIEW_HOME is active — moves
+    // the highlighted tile, or activates it (either switching to that
+    // tile's view, or running its action for the two action-only tiles
+    // handled directly in main.cpp: WiFi portal toggle, Beacon Now).
+    void homeMove(int dCol, int dRow);
+    // Returns the currently-selected tile's index and label, so
+    // main.cpp can decide what "activate" means for tiles that aren't a
+    // plain view switch (WiFi/Beacon).
+    int         homeSelectedIndex();
+    const char* homeSelectedLabel();
 
     // ── Map view helpers (used by map_utils.cpp) ──────────────────────
     // Keep the TFT_eSPI object private to display_utils.cpp; the map

@@ -26,7 +26,7 @@ static TFT_eSPI tft = TFT_eSPI();
 // complete finished frame. Created once in Display_Utils::setup().
 static TFT_eSprite spr = TFT_eSprite(&tft);
 static bool spriteReady = false;
-static DisplayView currentView = VIEW_STATIONS;   // home screen: callsigns heard
+static DisplayView currentView = VIEW_HOME;   // home screen: icon grid
 static uint32_t lastRedrawMs = 0;
 static uint32_t overlayUntilMs = 0;   // suppress redraw while an overlay message is showing
 
@@ -40,6 +40,107 @@ static uint32_t overlayUntilMs = 0;   // suppress redraw while an overlay messag
 #define C_GREY      0x5AEB
 #define C_WHITE     0xFFFF
 #define C_PURPLE    0x780F
+
+// ── Home screen: icon grid ───────────────────────────────────────────────
+// One tile per function, navigable with the trackball/keyboard direction
+// keys and selected with Enter (centre click) — the actual entry point
+// for "using all the buttons correctly" instead of memorising letter
+// shortcuts. The letter shortcuts (S/T/M/etc.) still work everywhere as
+// a fast path for anyone who prefers them; this is the discoverable one.
+struct HomeTile {
+    const char* label;
+    uint16_t    colour;
+    DisplayView target;   // VIEW_HOME itself means "run an action, not a view swap"
+};
+static const HomeTile HOME_TILES[] = {
+    { "Stations", C_ACCENT, VIEW_STATIONS },
+    { "Messages", C_GREEN,  VIEW_MESSAGES },
+    { "Map",      C_PURPLE, VIEW_MAP      },
+    { "Sats",     C_AMBER,  VIEW_SATS     },
+    { "Status",   C_WHITE,  VIEW_STATUS   },
+    { "Setup",    C_ACCENT, VIEW_SETUP    },
+    { "WiFi",     C_GREEN,  VIEW_HOME     },   // action: toggle Setup Portal
+    { "Beacon",   C_RED,    VIEW_HOME     },   // action: send beacon now
+};
+static const int HOME_TILE_COUNT = sizeof(HOME_TILES) / sizeof(HOME_TILES[0]);
+static int homeSelected = 0;
+
+// Simple geometric glyph per tile — no bitmap icon set on this firmware,
+// so each is drawn as a small distinct shape rather than plain text,
+// which is what made the old letter-only footer hard to scan at a
+// glance. Kept intentionally simple (a handful of primitives each) to
+// stay fast to redraw every second alongside everything else.
+static void drawHomeIcon(int idx, int cx, int cy, uint16_t colour) {
+    switch (idx) {
+        case 0:  // Stations — signal/antenna dot with radiating arcs
+            spr.fillCircle(cx, cy + 6, 3, colour);
+            spr.drawCircle(cx, cy + 6, 9, colour);
+            spr.drawCircle(cx, cy + 6, 15, colour);
+            break;
+        case 1:  // Messages — speech bubble
+            spr.fillRoundRect(cx - 14, cy - 10, 28, 18, 4, colour);
+            spr.fillTriangle(cx - 6, cy + 8, cx, cy + 14, cx + 2, cy + 8, colour);
+            break;
+        case 2:  // Map — folded map with a location pin
+            spr.drawRect(cx - 14, cy - 10, 28, 20, colour);
+            spr.drawFastVLine(cx - 5, cy - 10, 20, colour);
+            spr.drawFastVLine(cx + 5, cy - 10, 20, colour);
+            spr.fillCircle(cx, cy, 3, colour);
+            break;
+        case 3:  // Sats — orbit ring with a satellite dot
+            spr.drawCircle(cx, cy, 13, colour);
+            spr.fillCircle(cx + 9, cy - 9, 3, colour);
+            break;
+        case 4:  // Status — a simple gauge/dial
+            spr.drawCircle(cx, cy, 13, colour);
+            spr.drawLine(cx, cy, cx + 8, cy - 8, colour);
+            break;
+        case 5:  // Setup — gear-ish shape (octagon-like via lines)
+            spr.drawCircle(cx, cy, 10, colour);
+            for (int a = 0; a < 360; a += 45) {
+                float rad = a * DEG_TO_RAD;
+                int x1 = cx + (int)(10 * cosf(rad)), y1 = cy + (int)(10 * sinf(rad));
+                int x2 = cx + (int)(15 * cosf(rad)), y2 = cy + (int)(15 * sinf(rad));
+                spr.drawLine(x1, y1, x2, y2, colour);
+            }
+            break;
+        case 6:  // WiFi — signal arcs
+            spr.drawCircle(cx, cy + 8, 2, colour);
+            for (int r = 6; r <= 16; r += 5) {
+                spr.drawArc(cx, cy + 8, r, r - 1, 210, 330, colour, C_BG);
+            }
+            break;
+        case 7:  // Beacon — radio tower
+            spr.drawLine(cx, cy - 12, cx - 8, cy + 12, colour);
+            spr.drawLine(cx, cy - 12, cx + 8, cy + 12, colour);
+            spr.drawFastHLine(cx - 4, cy, 8, colour);
+            spr.fillCircle(cx, cy - 14, 2, colour);
+            break;
+    }
+}
+
+static void drawHomeView() {
+    spr.fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT - 20, C_BG);
+
+    const int cols = 4, rows = 2;
+    const int tileW = SCREEN_WIDTH / cols;
+    const int tileH = (SCREEN_HEIGHT - 20) / rows;
+
+    for (int i = 0; i < HOME_TILE_COUNT; i++) {
+        int col = i % cols, row = i / cols;
+        int x = col * tileW, y = 20 + row * tileH;
+        bool sel = (i == homeSelected);
+
+        if (sel) spr.fillRoundRect(x + 3, y + 3, tileW - 6, tileH - 6, 6, 0x2965);
+        drawHomeIcon(i, x + tileW / 2, y + tileH / 2 - 8, HOME_TILES[i].colour);
+
+        spr.setTextColor(sel ? C_WHITE : C_GREY, sel ? 0x2965 : C_BG);
+        spr.setTextSize(1);
+        int textW = strlen(HOME_TILES[i].label) * 6;
+        spr.setCursor(x + tileW / 2 - textW / 2, y + tileH - 16);
+        spr.print(HOME_TILES[i].label);
+    }
+}
 
 static void drawStatusBar() {
     // Top 20px status bar
@@ -551,6 +652,7 @@ void Display_Utils::loop() {
         // flicker returns, but the UI still works.
         drawStatusBar();
         switch (currentView) {
+            case VIEW_HOME:      drawHomeView();     break;
             case VIEW_STATUS:   drawStatusView();   break;
             case VIEW_STATIONS: drawStationList();  break;
             case VIEW_MESSAGES: drawMessagesView(); break;
@@ -565,6 +667,7 @@ void Display_Utils::loop() {
     // panel in one go — see the spr declaration/comment above for why.
     drawStatusBar();
     switch (currentView) {
+        case VIEW_HOME:      drawHomeView();     break;
         case VIEW_STATUS:   drawStatusView();   break;
         case VIEW_STATIONS: drawStationList();  break;
         case VIEW_MESSAGES: drawMessagesView(); break;
@@ -579,23 +682,45 @@ void Display_Utils::setView(DisplayView v)  { currentView = v; lastRedrawMs = 0;
 DisplayView Display_Utils::getView()         { return currentView; }
 void Display_Utils::setBrightness(int v)     { ledcWrite(0, v); }
 
+void Display_Utils::homeMove(int dCol, int dRow) {
+    const int cols = 4;
+    int col = homeSelected % cols, row = homeSelected / cols;
+    int rows = (HOME_TILE_COUNT + cols - 1) / cols;
+    col = (col + dCol + cols) % cols;
+    row = (row + dRow + rows) % rows;
+    int idx = row * cols + col;
+    if (idx < HOME_TILE_COUNT) homeSelected = idx;
+    lastRedrawMs = 0;   // force an immediate redraw so the highlight moves without a 1s lag
+}
+int  Display_Utils::homeSelectedIndex() { return homeSelected; }
+const char* Display_Utils::homeSelectedLabel() { return HOME_TILES[homeSelected].label; }
+
 void Display_Utils::showMessage(const String& title, const String& body, uint16_t colour) {
     overlayUntilMs = millis() + 4000;   // keep visible for 4 s
-    tft.fillRect(20, 80, 280, 80, 0x1104);
-    tft.drawRect(20, 80, 280, 80, colour);
-    tft.setTextColor(colour, 0x1104);
-    tft.setTextSize(1);
-    tft.setCursor(28, 90);
-    tft.print(title);
-    tft.setTextColor(C_WHITE, 0x1104);
-    tft.setCursor(28, 105);
+    // Draws into the sprite (like every other view) rather than straight
+    // to tft — this was the actual bug behind "the popup just flashes and
+    // disappears": drawing direct-to-panel here meant the next 1s sprite
+    // push (spr.pushSprite in loop()) immediately overwrote it with
+    // whatever the current view's own content is, since that full-frame
+    // push runs regardless of an overlay being up. Now the message is
+    // baked into the same frame Display_Utils::loop() pushes each cycle,
+    // so it actually stays visible for the full 4s hold.
+    spr.fillRect(20, 80, 280, 80, 0x1104);
+    spr.drawRect(20, 80, 280, 80, colour);
+    spr.setTextColor(colour, 0x1104);
+    spr.setTextSize(1);
+    spr.setCursor(28, 90);
+    spr.print(title);
+    spr.setTextColor(C_WHITE, 0x1104);
+    spr.setCursor(28, 105);
     // Word-wrap body
     String word, line;
     for (char c : body + ' ') {
         if (c == ' ') {
-            if ((line + word).length() > 38) { tft.println(line); line = ""; tft.setCursor(28, tft.getCursorY()); }
+            if ((line + word).length() > 38) { spr.println(line); line = ""; spr.setCursor(28, spr.getCursorY()); }
             line += word + ' '; word = "";
         } else word += c;
     }
-    if (line.length()) { tft.setCursor(28, tft.getCursorY()); tft.println(line); }
+    if (line.length()) { spr.setCursor(28, spr.getCursorY()); spr.println(line); }
+    if (spriteReady) spr.pushSprite(0, 0);   // push immediately — don't wait for the next 1s cycle
 }

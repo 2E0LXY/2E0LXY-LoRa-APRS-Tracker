@@ -38,6 +38,7 @@
 #include "audio_utils.h"
 #include "map_utils.h"
 #include "setup_view.h"
+#include "trackball_utils.h"
 
 // ── Forward declarations ──────────────────────────────────────────────────
 void handleKeyInput(char key);
@@ -80,6 +81,7 @@ void setup() {
 
     // Keyboard
     Keyboard_Utils::setup();
+    Trackball_Utils::setup();
 
     // Weather sensor (auto-detect BME280 on I2C)
     Weather_Utils::setup();
@@ -139,11 +141,38 @@ void loop() {
         MQTT_Utils::loop();
     }
 
+    // Temporary WiFi stability diagnostic
+    static bool lastWifiUp = false;
+    static uint32_t lastWifiEventMs = 0;
+    bool wifiUp = WiFi.isConnected();
+    if (wifiUp != lastWifiUp) {
+        Serial.printf("WiFi: %s (RSSI %ddBm, after %lums)\n",
+            wifiUp ? "UP" : "DOWN", WiFi.RSSI(), millis() - lastWifiEventMs);
+        lastWifiUp = wifiUp;
+        lastWifiEventMs = millis();
+    }
+    static uint32_t lastHeapMs = 0;
+    if (millis() - lastHeapMs > 15000) {
+        lastHeapMs = millis();
+        Serial.printf("Heap: free=%u minFree=%u\n", ESP.getFreeHeap(), ESP.getMinFreeHeap());
+    }
+
     // Keyboard input
     if (Keyboard_Utils::available()) {
         char k = Keyboard_Utils::getKey();
         if (k) handleKeyInput(k);
     }
+
+    // Trackball input — directional reading disabled for now (GPIO3/Up
+    // is a floating strapping pin on this chip, architecturally noisy
+    // regardless of software filtering — several detection strategies
+    // were tried and none were reliable enough). Centre click still
+    // works (plain GPIO0 button, not affected by this) and maps to
+    // Enter, matching every view's existing Enter-to-select behaviour.
+    // Keyboard navigation (letters, ,/./I/O) remains the reliable path
+    // for every screen in the meantime.
+    Trackball_Utils::loop();
+    if (Trackball_Utils::clickPressed()) handleKeyInput('\r');
 
     // Display refresh
     Display_Utils::loop();
@@ -226,7 +255,7 @@ void handleKeyInput(char key) {
     // outside of active editing.
     if (inSetup) {
         if (isDelete && !Setup_View::isEditing()) {
-            Display_Utils::setView(VIEW_STATIONS);
+            Display_Utils::setView(VIEW_HOME);
             return;
         }
         Setup_View::handleKey(key);
@@ -234,16 +263,15 @@ void handleKeyInput(char key) {
     }
 
     // Delete/backspace outside compose mode always returns to the home
-    // screen (Stations — callsigns heard). Inside Messages it backspaces
-    // the typed text as before — except on an already-empty buffer, where
-    // there's nothing left to delete, so it also returns home instead of
-    // doing nothing.
+    // screen (icon grid). Inside Messages it backspaces the typed text as
+    // before — except on an already-empty buffer, where there's nothing
+    // left to delete, so it also returns home instead of doing nothing.
     if (isDelete && !inMessages) {
-        Display_Utils::setView(VIEW_STATIONS);
+        Display_Utils::setView(VIEW_HOME);
         return;
     }
     if (isDelete && inMessages && Keyboard_Utils::getBuffer().length() == 0) {
-        Display_Utils::setView(VIEW_STATIONS);
+        Display_Utils::setView(VIEW_HOME);
         return;
     }
 
@@ -255,7 +283,7 @@ void handleKeyInput(char key) {
             String dest = Messaging::getReplyTarget();
             if (buf.length() == 0) {
                 // Enter on empty buffer exits messages view (to home)
-                Display_Utils::setView(VIEW_STATIONS);
+                Display_Utils::setView(VIEW_HOME);
                 return;
             }
             if (dest.length() > 0) {
@@ -297,6 +325,51 @@ void handleKeyInput(char key) {
     }
 
     // ── Navigation (outside messages view) ──────────────────────────────
+    // Home screen: direction keys move the highlight, Enter activates the
+    // selected tile. i/o/,/. are what the trackball's four directions and
+    // the keyboard's own pan/zoom keys both send (see Trackball_Utils in
+    // the main loop and the Map pan bindings below) — reusing them here
+    // means the same physical inputs navigate the grid without needing a
+    // separate set of "arrow key" bindings.
+    if (Display_Utils::getView() == VIEW_HOME) {
+        if (key == 'i' || key == 'I') { Display_Utils::homeMove(0, -1); return; }
+        if (key == 'o' || key == 'O') { Display_Utils::homeMove(0, 1);  return; }
+        if (key == ',') { Display_Utils::homeMove(-1, 0); return; }
+        if (key == '.') { Display_Utils::homeMove(1, 0);  return; }
+        if (key == '\r' || key == '\n') {
+            const char* label = Display_Utils::homeSelectedLabel();
+            if (strcmp(label, "WiFi") == 0) {
+                if (!WebConfig::isRunning()) {
+                    WebConfig::begin();
+                    Display_Utils::showMessage("Setup Portal",
+                        "Join WiFi '2E0LXY-Tracker-Setup' then browse to 192.168.4.1", TFT_CYAN);
+                } else {
+                    WebConfig::stop();
+                    Display_Utils::showMessage("Setup Portal", "Stopped", TFT_ORANGE);
+                }
+            } else if (strcmp(label, "Beacon") == 0) {
+                Beacon_Utils::sendBeacon();
+                Display_Utils::showMessage("Beacon", "Manual beacon sent", TFT_GREEN);
+            } else if (strcmp(label, "Stations") == 0) {
+                Display_Utils::setView(VIEW_STATIONS);
+            } else if (strcmp(label, "Messages") == 0) {
+                Display_Utils::setView(VIEW_MESSAGES);
+            } else if (strcmp(label, "Map") == 0) {
+                Display_Utils::setView(VIEW_MAP);
+            } else if (strcmp(label, "Sats") == 0) {
+                Display_Utils::setView(VIEW_SATS);
+            } else if (strcmp(label, "Status") == 0) {
+                Display_Utils::setView(VIEW_STATUS);
+            } else if (strcmp(label, "Setup") == 0) {
+                Setup_View::enter();
+                Display_Utils::setView(VIEW_SETUP);
+            }
+            return;
+        }
+        // Fall through to the letter shortcuts below too, so 's'/'t'/'m'
+        // etc. still work as a fast path even from the home screen.
+    }
+
     // Letter aliases (s/t/m/w/p/u) alongside the printed digits — the
     // T-Deck keyboard co-processor resolves its own shift/symbol layer
     // before the byte reaches us, so Alt+<number-row key> doesn't reliably
@@ -309,10 +382,13 @@ void handleKeyInput(char key) {
     if (key == 'c' || key == 'C') { Setup_View::enter(); Display_Utils::setView(VIEW_SETUP); return; }
     // Map pan/zoom — checked and consumed before any other letter binding
     // so it can't be shadowed by globals like 'w' (WiFi portal) or
-    // 's'/'t'/'m' (view switches). Trackball isn't wired to firmware yet
-    // (GPIOs are defined in board_pins.h but unused — see TBOX_* pins),
-    // so this is keyboard-only for now: I/O zoom, comma/period pan
-    // left/right, semicolon/quote pan up/down, G recentre on GPS.
+    // 's'/'t'/'m' (view switches). The trackball also feeds into this
+    // same key-handling path (see Trackball_Utils in the main loop): its
+    // up/down maps to 'i'/'o' (zoom here, field navigation in Setup) and
+    // left/right maps to ','/'.', so it works everywhere these letter
+    // keys already do without any separate handling.
+    // Keyboard: I/O zoom, comma/period pan left/right, semicolon/quote
+    // pan up/down, G recentre on GPS.
     if (Display_Utils::getView() == VIEW_MAP) {
         if (key == 'i' || key == 'I') { Map_Utils::zoomIn();       return; }
         if (key == 'o' || key == 'O') { Map_Utils::zoomOut();      return; }

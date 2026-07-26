@@ -14,8 +14,20 @@ void GPS_Utils::setup() {
 }
 
 void GPS_Utils::loop() {
+    // TEMP diagnostic: print raw bytes from the GPS UART so we can see
+    // directly whether anything is arriving at all, independent of
+    // whether TinyGPS++ can parse it as valid NMEA.
+    static uint32_t rawByteCount = 0;
+    static uint32_t lastRawPrintMs = 0;
     while (gpsSerial.available()) {
-        gps.encode(gpsSerial.read());
+        int c = gpsSerial.read();
+        rawByteCount++;
+        gps.encode(c);
+    }
+    if (millis() - lastRawPrintMs > 5000) {
+        lastRawPrintMs = millis();
+        Serial.printf("GPS UART: %u bytes received in the last 5s\n", rawByteCount);
+        rawByteCount = 0;
     }
     // Satellite count/HDOP update independently of location — these come
     // from $GPGSV/$GPGGA sentences the module sends even with no fix yet,

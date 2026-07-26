@@ -27,7 +27,20 @@
 #define LORA_RST            17
 #define LORA_BUSY           13
 
-// ── GPS L76K ─────────────────────────────────────────────────────────────
+// ── GPS (MIA-M10Q on T-Deck Plus) ────────────────────────────────────────
+// Reverted to the original 43/44 pins after the "quick-start" wiki page's
+// 21/48 @ 38400 turned out to contradict LilyGO's own main T-Deck Plus
+// reference page (which uses named BOARD_GPS_TX_PIN/RX_PIN at 9600) and,
+// more importantly, a Meshtastic firmware GitHub issue confirms their
+// actual working T-Deck Plus board logs "Using GPIO44 for GPS RX" /
+// "Using GPIO43 for GPS TX" — matching what we had originally, not the
+// quick-start numbers. That same issue (meshtastic/firmware#4625) also
+// documents this exact symptom as a known T-Deck Plus quirk: "Often the
+// unit will fail to detect the GPS module... reports No GPS Present",
+// with Meshtastic's own driver probing multiple baud rates (9600, then
+// 4800) since the module doesn't reliably announce one. Zero bytes
+// received on 21/48 @ 38400 (confirmed via a raw byte-count diagnostic)
+// means that pin/baud combination was simply wrong for this hardware.
 #define GPS_TX              43   // ESP32 TX → GPS RX
 #define GPS_RX              44   // GPS TX → ESP32 RX
 #define GPS_BAUD            9600
@@ -40,11 +53,15 @@
 #define TOUCH_INT           16
 
 // ── Trackball (GPIO) ─────────────────────────────────────────────────────
-#define TBOX_UP             2    // BOARD_TBOX_G02
+// Corrected mapping: Up=3, Down=15, Left=1, Right=2 — the original
+// UP=2/LEFT=3/RIGHT=1 had Up and Right swapped with Left, matching the
+// reported symptom exactly ("moving up or left when scrolling right").
+#define TBOX_UP             3    // BOARD_TBOX_G01
 #define TBOX_DOWN           15   // BOARD_TBOX_G03
-#define TBOX_LEFT           3    // BOARD_TBOX_G01
-#define TBOX_RIGHT          1    // BOARD_TBOX_G04
-// Click is detected via keyboard I2C
+#define TBOX_LEFT           1    // BOARD_TBOX_G04
+#define TBOX_RIGHT          2    // BOARD_TBOX_G02
+// Centre click is GPIO0 (shared with BOOT) — read directly as a plain
+// digital input during normal runtime; see trackball_utils.cpp.
 
 // ── Battery ADC ──────────────────────────────────────────────────────────
 #define BOARD_BAT_ADC       4

@@ -313,6 +313,18 @@ void APRS_Utils::connect() {
         ws.beginSSL("www.aprsnet.uk", 443, "/ws");
         ws.onEvent(onWsEvent);
         ws.setReconnectInterval(0);   // we drive reconnect ourselves via loop()/connect()
+        // Client-side heartbeat — the library defaults to none, which
+        // leaves disconnect detection entirely to the underlying TCP
+        // socket noticing a break. On some networks that's unreliable
+        // (a stalled/half-open connection over a flaky link or NAT can
+        // sit undetected, or conversely get dropped by an intermediate
+        // proxy for looking idle), which showed up in testing as the
+        // WebSocket repeatedly connecting, authenticating, then dropping
+        // every 10-20s. 15s ping / 5s pong timeout / disconnect after 2
+        // misses gives a bounded ~25s worst case to detect and recover
+        // from a genuinely dead link, while keeping the socket demonstrably
+        // active so it's less likely to be treated as idle in transit.
+        ws.enableHeartbeat(15000, 5000, 2);
         // WStype_CONNECTED above flips aprsConnected — begin() itself is
         // async/non-blocking, so there's nothing further to check here.
         return;
