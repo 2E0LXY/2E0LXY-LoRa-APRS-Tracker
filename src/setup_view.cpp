@@ -2,15 +2,17 @@
 #include "configuration.h"
 #include "display_utils.h"
 #include "board_pins.h"
+#include "ota_utils.h"
 #include <TFT_eSPI.h>
 #include <SD.h>
+#include <WiFi.h>
 
 namespace {
     // Indices into fields() with fixed meaning, so handleKey() knows what
     // to write back to Config on confirm without string-matching labels.
     enum FieldIndex {
         F_CALLSIGN, F_SSID, F_WIFI_SSID, F_WIFI_PASS,
-        F_TX_ENABLED, F_AUDIO_ENABLED, F_AUDIO_VOLUME, F_FORMAT_SD,
+        F_TX_ENABLED, F_AUDIO_ENABLED, F_AUDIO_VOLUME, F_FORMAT_SD, F_CHECK_UPDATE,
         F_COUNT
     };
 
@@ -31,6 +33,8 @@ namespace {
         fieldList.push_back({"Sound Volume", FieldType::NUMBER,   String(Config.audio.volume)});
         fieldList.push_back({"Format SD Card", FieldType::ACTION,
             formatArmed ? "Press Enter again to confirm" : "Enter: create folders"});
+        fieldList.push_back({"Check for Update", FieldType::ACTION,
+            String("Running: ") + FW_VERSION + " — Enter to check"});
     }
 
     // Creates the folder structure the map view expects (/map). Safe to
@@ -148,6 +152,21 @@ void Setup_View::handleKey(char key) {
                     formatArmed = false;
                     formatSdCard();
                     syncFromConfig();
+                }
+            } else if (selected == F_CHECK_UPDATE) {
+                if (!WiFi.isConnected()) {
+                    Display_Utils::showMessage("Update", "No WiFi connection", TFT_RED);
+                } else {
+                    // checkAndUpdate(true) reboots the device itself on a
+                    // successful flash — nothing runs after that point if
+                    // an update was found. If it returns, either there was
+                    // nothing newer or the download/flash failed (details
+                    // are on the serial log — no on-device error surface
+                    // for that yet, matches the automatic 6h check's
+                    // silent-failure behaviour).
+                    Display_Utils::showMessage("Update", "Checking...", TFT_CYAN);
+                    OTA_Utils::checkAndUpdate(true);
+                    Display_Utils::showMessage("Update", "No update found (or check failed) — see serial log", TFT_ORANGE);
                 }
             }
         } else {
