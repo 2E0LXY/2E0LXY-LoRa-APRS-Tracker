@@ -28,14 +28,22 @@ namespace {
     }
 
     // Simple majority: whichever pin was low most often this window
-    // wins, provided at least one reading happened at all (all-zero
-    // windows — the ball wasn't touched — report nothing).
+    // wins — but a genuinely untouched trackball still produces the
+    // occasional single stray low reading on some pin (confirmed
+    // repeatedly in testing on this hardware), and with no floor at all
+    // a single count of 1 out of an ~80-poll window "wins" by default,
+    // firing a direction every debounce cycle forever with the ball
+    // never touched (reported: "just scrolls up down, no control").
+    // Requiring at least a few counts is the minimum floor that still
+    // keeps this a plain majority vote rather than reintroducing the
+    // margin/history logic that failed differently before.
+    const int MIN_VOTES = 4;
     char resolveWinner() {
         int counts[4] = { upCount, downCount, leftCount, rightCount };
         char labels[4] = { 'U', 'D', 'L', 'R' };
         int bestIdx = 0;
         for (int i = 1; i < 4; i++) if (counts[i] > counts[bestIdx]) bestIdx = i;
-        if (counts[bestIdx] == 0) return 0;
+        if (counts[bestIdx] < MIN_VOTES) return 0;
         return labels[bestIdx];
     }
 }
