@@ -165,28 +165,43 @@ void loop() {
         if (k) handleKeyInput(k);
     }
 
-    // Trackball input — directional reading disabled for now (GPIO3/Up
-    // is a floating strapping pin on this chip, architecturally noisy
-    // regardless of software filtering — several detection strategies
-    // were tried and none were reliable enough). Centre click still
-    // works (plain GPIO0 button, not affected by this) and maps to
-    // Enter, matching every view's existing Enter-to-select behaviour.
-    // Keyboard navigation (letters, ,/./I/O) remains the reliable path
-    // for every screen in the meantime.
+    // Trackball input — re-enabled with a simple majority-vote reading
+    // (see trackball_utils.cpp): whichever direction pin was low most
+    // often during each ~80ms window wins, no minimum count or margin
+    // requirement. On the home screen this moves the tile selection
+    // directly; elsewhere it falls back to the same keys the keyboard's
+    // I/O/,/. bindings already use (Map pan/zoom, Setup field
+    // navigation), so it works the same way pressing those keys would.
+    // Centre click still maps to Enter everywhere, matching every view's
+    // existing Enter-to-select/confirm behaviour.
     Trackball_Utils::loop();
+    char tbDir = Trackball_Utils::getDirection();
+    if (tbDir && Display_Utils::getView() == VIEW_HOME) {
+        if (tbDir == 'U') Display_Utils::homeMove(0, -1);
+        else if (tbDir == 'D') Display_Utils::homeMove(0, 1);
+        else if (tbDir == 'L') Display_Utils::homeMove(-1, 0);
+        else if (tbDir == 'R') Display_Utils::homeMove(1, 0);
+    } else if (tbDir) {
+        if (tbDir == 'U') handleKeyInput('i');
+        else if (tbDir == 'D') handleKeyInput('o');
+        else if (tbDir == 'L') handleKeyInput(',');
+        else if (tbDir == 'R') handleKeyInput('.');
+    }
     if (Trackball_Utils::clickPressed()) handleKeyInput('\r');
 
     // Touchscreen input (GT911, confirmed present on this hardware via
-    // LilyGO's own factory firmware — see touch_utils.cpp). Scoped to
-    // the home screen for now: a tap there selects the tile under the
-    // finger AND immediately activates it in one motion (direct-
-    // manipulation, unlike keyboard/trackball's separate select-then-
-    // Enter), by calling the same activation path as pressing Enter on
-    // a keyboard/trackball-selected tile.
-    if (Touch_Utils::isPresent()) {
+    // LilyGO's own factory firmware — see touch_utils.cpp). Only polled
+    // while actually on the home screen (the only place it's wired up to
+    // do anything) — it shares the I2C bus with the keyboard, and
+    // polling it every loop iteration regardless of view was very likely
+    // starving/corrupting keyboard I2C timing on other screens (reported:
+    // Setup fields stopped accepting any typed characters after touch
+    // support was added, while navigation — which doesn't hit the I2C
+    // bus as often per keypress — still worked).
+    if (Touch_Utils::isPresent() && Display_Utils::getView() == VIEW_HOME) {
         Touch_Utils::loop();
         int tx, ty;
-        if (Touch_Utils::tapped(tx, ty) && Display_Utils::getView() == VIEW_HOME) {
+        if (Touch_Utils::tapped(tx, ty)) {
             if (Display_Utils::homeSelectAt(tx, ty)) {
                 handleKeyInput('\r');   // activate whatever homeSelectAt just selected
             }

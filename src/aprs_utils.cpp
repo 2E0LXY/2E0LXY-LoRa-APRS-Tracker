@@ -298,6 +298,27 @@ static void handleTcpLine(const String& lineIn) {
 void APRS_Utils::connect() {
     if (!WiFi.isConnected() || !Config.beacon.aprsIsEnabled) return;
     if (aprsConnected) return;
+
+    // Hard safety floor: TLS/SSL handshakes are known to leak heap on
+    // ESP32 across repeated connect cycles (confirmed via multiple
+    // independent library issue reports — mbedTLS session buffers not
+    // always fully released between attempts), and this showed up in
+    // testing as free heap dropping from ~150KB to under 40KB during a
+    // burst of rapid connect/disconnect cycles. Refusing to even attempt
+    // a new TLS connection below this floor stops the death spiral —
+    // repeated failed handshakes accelerating heap loss, which in turn
+    // makes the next handshake more likely to fail too — and gives
+    // other subsystems (which also need heap) a chance to keep working
+    // rather than the whole device becoming unstable or crashing.
+    if (ESP.getFreeHeap() < 40000) {
+        static uint32_t lastLowHeapWarnMs = 0;
+        if (millis() - lastLowHeapWarnMs > 30000) {
+            lastLowHeapWarnMs = millis();
+            Serial.printf("APRS-IS: skipping reconnect — heap too low (%u free)\n", ESP.getFreeHeap());
+        }
+        return;
+    }
+
     uint32_t now = millis();
     // Back off on repeated failures (10s, 20s, 40s... capped at 5 min)
     // instead of hammering the server every 10s regardless.
@@ -310,6 +331,12 @@ void APRS_Utils::connect() {
 
     if (usingWebSocket) {
         Serial.println("APRS-IS: connecting via WebSocket (wss://www.aprsnet.uk/ws)...");
+        ws.disconnect();   // ensure any prior (possibly half-torn-down)
+                            // session is explicitly released before
+                            // starting a fresh one, rather than relying
+                            // on beginSSL() to clean up an old context
+                            // implicitly — the suspected source of the
+                            // per-attempt heap loss.
         ws.beginSSL("www.aprsnet.uk", 443, "/ws");
         ws.onEvent(onWsEvent);
         ws.setReconnectInterval(0);   // we drive reconnect ourselves via loop()/connect()
