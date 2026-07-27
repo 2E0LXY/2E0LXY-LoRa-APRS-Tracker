@@ -36,6 +36,12 @@ namespace Display_Utils {
     // plain view switch (WiFi/Beacon).
     int         homeSelectedIndex();
     const char* homeSelectedLabel();
+    // Converts a screen tap (x,y) directly to a tile index and selects
+    // it, so a touch on the home grid picks the tile under the finger
+    // immediately rather than needing separate move-then-confirm steps
+    // like keyboard/trackball navigation. Returns false if the tap
+    // landed outside the tile grid (e.g. on the status bar).
+    bool        homeSelectAt(int x, int y);
 
     // ── Map view helpers (used by map_utils.cpp) ──────────────────────
     // Keep the TFT_eSPI object private to display_utils.cpp; the map

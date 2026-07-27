@@ -695,6 +695,21 @@ void Display_Utils::homeMove(int dCol, int dRow) {
 int  Display_Utils::homeSelectedIndex() { return homeSelected; }
 const char* Display_Utils::homeSelectedLabel() { return HOME_TILES[homeSelected].label; }
 
+bool Display_Utils::homeSelectAt(int x, int y) {
+    if (y < 20) return false;   // tap landed on the status bar, not a tile
+    const int cols = 4, rows = 2;
+    const int tileW = SCREEN_WIDTH / cols;
+    const int tileH = (SCREEN_HEIGHT - 20) / rows;
+    int col = x / tileW;
+    int row = (y - 20) / tileH;
+    if (col < 0 || col >= cols || row < 0 || row >= rows) return false;
+    int idx = row * cols + col;
+    if (idx >= HOME_TILE_COUNT) return false;
+    homeSelected = idx;
+    lastRedrawMs = 0;
+    return true;
+}
+
 void Display_Utils::showMessage(const String& title, const String& body, uint16_t colour) {
     overlayUntilMs = millis() + 4000;   // keep visible for 4 s
     // Draws into the sprite (like every other view) rather than straight

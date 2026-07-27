@@ -39,6 +39,7 @@
 #include "map_utils.h"
 #include "setup_view.h"
 #include "trackball_utils.h"
+#include "touch_utils.h"
 
 // ── Forward declarations ──────────────────────────────────────────────────
 void handleKeyInput(char key);
@@ -82,6 +83,7 @@ void setup() {
     // Keyboard
     Keyboard_Utils::setup();
     Trackball_Utils::setup();
+    Touch_Utils::setup();
 
     // Weather sensor (auto-detect BME280 on I2C)
     Weather_Utils::setup();
@@ -173,6 +175,23 @@ void loop() {
     // for every screen in the meantime.
     Trackball_Utils::loop();
     if (Trackball_Utils::clickPressed()) handleKeyInput('\r');
+
+    // Touchscreen input (GT911, confirmed present on this hardware via
+    // LilyGO's own factory firmware — see touch_utils.cpp). Scoped to
+    // the home screen for now: a tap there selects the tile under the
+    // finger AND immediately activates it in one motion (direct-
+    // manipulation, unlike keyboard/trackball's separate select-then-
+    // Enter), by calling the same activation path as pressing Enter on
+    // a keyboard/trackball-selected tile.
+    if (Touch_Utils::isPresent()) {
+        Touch_Utils::loop();
+        int tx, ty;
+        if (Touch_Utils::tapped(tx, ty) && Display_Utils::getView() == VIEW_HOME) {
+            if (Display_Utils::homeSelectAt(tx, ty)) {
+                handleKeyInput('\r');   // activate whatever homeSelectAt just selected
+            }
+        }
+    }
 
     // Display refresh
     Display_Utils::loop();
