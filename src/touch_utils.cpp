@@ -7,11 +7,18 @@ namespace {
     TouchDrvGT911 touch;
     bool present = false;
 
-    // Debounced tap detection: a "tap" is touch-down followed by touch-up
-    // without much movement, not a drag. We track whether we were
-    // touching last loop() and report a tap on the down->up transition.
-    bool wasTouching = false;
-    int  downX = 0, downY = 0;
+    // Simplified from an earlier down-then-up transition design: that
+    // needed to catch a touch-down AND its later touch-up across
+    // separate loop() polls, and a real finger tap is often brief enough
+    // that the main loop (LoRa/WiFi/display work in between polls) missed
+    // one edge or the other entirely — confirmed in testing as
+    // "intermittent, but does eventually [register]". Reporting on any
+    // detected touch, debounced so a held finger doesn't repeat-fire, is
+    // far more forgiving: it only needs to catch the touch during
+    // whichever poll happens to land while a finger is down, not two
+    // specific polls bracketing the whole gesture.
+    const uint32_t TAP_DEBOUNCE_MS = 350;
+    uint32_t lastTapMs = 0;
     bool tapPending = false;
     int  tapX = 0, tapY = 0;
 }
@@ -37,25 +44,17 @@ bool Touch_Utils::isPresent() { return present; }
 void Touch_Utils::loop() {
     if (!present) return;
 
-    TouchPoints points = touch.getTouchPoints();
-    bool touching = points.hasPoints();
+    uint32_t now = millis();
+    if (now - lastTapMs < TAP_DEBOUNCE_MS) return;   // still in lockout from the last reported tap
 
-    if (touching && !wasTouching) {
-        // Touch-down: record where it started.
+    TouchPoints points = touch.getTouchPoints();
+    if (points.hasPoints()) {
         auto& p = points.getPoint(0);
-        downX = p.x;
-        downY = p.y;
-    } else if (!touching && wasTouching) {
-        // Touch-up: if it didn't move far from where it started, count
-        // it as a tap. (downX/downY are from the last-seen down point;
-        // since we don't have the up coordinate once released, this is
-        // deliberately lenient — a real drag gesture isn't something the
-        // icon grid needs to distinguish from a tap at this stage.)
         tapPending = true;
-        tapX = downX;
-        tapY = downY;
+        tapX = p.x;
+        tapY = p.y;
+        lastTapMs = now;
     }
-    wasTouching = touching;
 }
 
 bool Touch_Utils::tapped(int& x, int& y) {
