@@ -18,6 +18,8 @@ namespace {
     // whichever poll happens to land while a finger is down, not two
     // specific polls bracketing the whole gesture.
     const uint32_t TAP_DEBOUNCE_MS = 350;
+    const uint32_t BOOT_SETTLE_MS = 2000;   // ignore touch reports for this long after setup()
+    uint32_t bootMs = 0;
     uint32_t lastTapMs = 0;
     bool tapPending = false;
     int  tapX = 0, tapY = 0;
@@ -29,6 +31,7 @@ void Touch_Utils::setup() {
     // UnitTest.ino exactly (touch.setPins(-1, BOARD_TOUCH_INT)).
     touch.setPins(-1, TOUCH_INT);
     present = touch.begin(Wire, GT911_SLAVE_ADDRESS_L, I2C_SDA, I2C_SCL);
+    bootMs = millis();
     if (present) {
         Serial.println("Touch: GT911 found");
         touch.setMaxCoordinates(320, 240);
@@ -45,6 +48,15 @@ void Touch_Utils::loop() {
     if (!present) return;
 
     uint32_t now = millis();
+    // Ignore touch reports for a couple seconds after boot — the GT911
+    // can report a stale/latched point on its very first read right
+    // after begin(), and with the debounce clock (lastTapMs=0) not yet
+    // primed, that first poll was firing immediately: landed on tile 0
+    // ("Stations", top-left — matching a phantom touch near the origin)
+    // every boot, reported as "goes straight to callsigns... like it's
+    // using that as home". A real finger tap two seconds into being
+    // powered on is not a meaningful UX cost.
+    if (now - bootMs < BOOT_SETTLE_MS) return;
     if (now - lastTapMs < TAP_DEBOUNCE_MS) return;   // still in lockout from the last reported tap
 
     TouchPoints points = touch.getTouchPoints();
