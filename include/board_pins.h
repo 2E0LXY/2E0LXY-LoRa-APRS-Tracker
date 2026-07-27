@@ -27,20 +27,21 @@
 #define LORA_RST            17
 #define LORA_BUSY           13
 
-// ── GPS (MIA-M10Q on T-Deck Plus) ────────────────────────────────────────
-// Reverted to the original 43/44 pins after the "quick-start" wiki page's
-// 21/48 @ 38400 turned out to contradict LilyGO's own main T-Deck Plus
-// reference page (which uses named BOARD_GPS_TX_PIN/RX_PIN at 9600) and,
-// more importantly, a Meshtastic firmware GitHub issue confirms their
-// actual working T-Deck Plus board logs "Using GPIO44 for GPS RX" /
-// "Using GPIO43 for GPS TX" — matching what we had originally, not the
-// quick-start numbers. That same issue (meshtastic/firmware#4625) also
-// documents this exact symptom as a known T-Deck Plus quirk: "Often the
-// unit will fail to detect the GPS module... reports No GPS Present",
-// with Meshtastic's own driver probing multiple baud rates (9600, then
-// 4800) since the module doesn't reliably announce one. Zero bytes
-// received on 21/48 @ 38400 (confirmed via a raw byte-count diagnostic)
-// means that pin/baud combination was simply wrong for this hardware.
+// ── GPS: L76K on T-Deck Plus ──────────────────────────────────────────────
+// Pins AND baud both confirmed authoritative via LilyGO's own factory
+// UnitTest firmware (examples/UnitTest/{utilities.h,UnitTest.ino} in
+// Xinyuan-LilyGO/T-Deck): BOARD_GPS_TX_PIN=43, BOARD_GPS_RX_PIN=44,
+// 9600 baud. The module also needs an active init sequence ($PCAS0x
+// commands) sent to it on boot — see GPS_Utils::setup() in
+// gps_utils.cpp — the L76K doesn't necessarily output full NMEA on its
+// own without it, which is very likely why plain listening at 9600
+// with no config produced nothing recognisable. An earlier on-device
+// auto-baud probe (now removed) appeared to find valid-looking data at
+// 38400/19200, but those were almost certainly false positives — a
+// stray '$' byte landing inside mis-clocked binary noise at the wrong
+// bit rate, not genuine communication (the factory reference is
+// unambiguous on 9600, and a UBX-format module wouldn't explain the
+// $PCAS/L76K-specific config this module apparently needs).
 #define GPS_TX              43   // ESP32 TX → GPS RX
 #define GPS_RX              44   // GPS TX → ESP32 RX
 #define GPS_BAUD            9600

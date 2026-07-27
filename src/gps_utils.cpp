@@ -9,25 +9,67 @@ static HardwareSerial gpsSerial(1);
 GPSData gpsData;
 
 void GPS_Utils::setup() {
-    gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX, GPS_TX);
-    Serial.println("GPS: UART initialised");
+    // L76K init sequence, matching LilyGO's own factory UnitTest firmware
+    // (examples/UnitTest/UnitTest.ino, setupGPS()) exactly — 9600 baud is
+    // authoritative there (not 38400/19200, which earlier ad-hoc auto-baud
+    // probing on this firmware appeared to match, but were very likely
+    // false positives: a stray '$' byte landing in mis-clocked binary
+    // noise at the wrong rate, not genuine communication). Crucially, the
+    // factory code also actively configures the L76K — sends $PCAS03 to
+    // stop/reset NMEA output, $PCAS06 to read firmware info and confirm
+    // an L76K responded, $PCAS04 to enable GPS+GLONASS, a second $PCAS03
+    // to enable every NMEA sentence type, and $PCAS11 for vehicle
+    // dynamics mode. This firmware never did any of that — it only ever
+    // opened the UART and listened — so even at the correct 9600 baud,
+    // the module may simply not have been configured to output anything
+    // useful yet, which fits everything observed: sometimes silence,
+    // sometimes non-NMEA-shaped bytes.
+    gpsSerial.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
+
+    bool l76kConfirmed = false;
+    for (int i = 0; i < 3 && !l76kConfirmed; i++) {
+        gpsSerial.write("$PCAS03,0,0,0,0,0,0,0,0,0,0,,,0,0*02\r\n");
+        delay(5);
+        uint32_t stopTimeout = millis() + 3000;
+        while (gpsSerial.available()) {
+            gpsSerial.read();
+            if (millis() > stopTimeout) break;
+        }
+        gpsSerial.flush();
+        delay(200);
+        gpsSerial.write("$PCAS06,0*1B\r\n");
+        uint32_t verTimeout = millis() + 500;
+        while (!gpsSerial.available() && millis() < verTimeout) { /* wait */ }
+        gpsSerial.setTimeout(10);
+        String ver = gpsSerial.readStringUntil('\n');
+        if (ver.startsWith("$GPTXT,01,01,02")) {
+            l76kConfirmed = true;
+            Serial.println("GPS: L76K confirmed via $PCAS06 version query");
+        } else {
+            delay(500);
+        }
+    }
+    if (!l76kConfirmed) {
+        Serial.println("GPS: L76K not confirmed via $PCAS06 — configuring anyway (module may still respond to config even if the version probe missed)");
+    }
+
+    // GPS + GLONASS
+    gpsSerial.write("$PCAS04,5*1C\r\n");
+    delay(250);
+    // Enable every NMEA sentence type (matches the factory default —
+    // more than we strictly need, but TinyGPS++ only reads what it
+    // recognises and ignores the rest)
+    gpsSerial.write("$PCAS03,1,1,1,1,1,1,1,1,1,1,,,0,0*02\r\n");
+    delay(250);
+    // Vehicle dynamics mode
+    gpsSerial.write("$PCAS11,3*1E\r\n");
+
+    Serial.println("GPS: UART initialised (9600 baud, L76K configured)");
 }
 
 void GPS_Utils::loop() {
-    // TEMP diagnostic: print raw bytes from the GPS UART so we can see
-    // directly whether anything is arriving at all, independent of
-    // whether TinyGPS++ can parse it as valid NMEA.
-    static uint32_t rawByteCount = 0;
-    static uint32_t lastRawPrintMs = 0;
     while (gpsSerial.available()) {
-        int c = gpsSerial.read();
-        rawByteCount++;
-        gps.encode(c);
-    }
-    if (millis() - lastRawPrintMs > 5000) {
-        lastRawPrintMs = millis();
-        Serial.printf("GPS UART: %u bytes received in the last 5s\n", rawByteCount);
-        rawByteCount = 0;
+        gps.encode(gpsSerial.read());
     }
     // Satellite count/HDOP update independently of location — these come
     // from $GPGSV/$GPGGA sentences the module sends even with no fix yet,
