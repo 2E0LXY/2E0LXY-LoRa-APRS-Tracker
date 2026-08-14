@@ -10,6 +10,7 @@
 static const char* GITHUB_REPO    = "2E0LXY/2E0LXY-LoRa-APRS-Tracker";
 static const char* CURRENT_VER    = FW_VERSION;
 static uint32_t   lastCheckMs     = 0;
+static bool       firstLoopSeen   = false;   // see OTA_Utils::loop() below
 static const uint32_t CHECK_INTERVAL = 6UL * 3600UL * 1000UL; // 6 hours
 
 // TLS: certificate validation is skipped (setInsecure). GitHub asset
@@ -102,6 +103,23 @@ void OTA_Utils::checkAndUpdate(bool force) {
 void OTA_Utils::loop() {
     if (!WiFi.isConnected()) return;
     uint32_t now = millis();
+    // lastCheckMs previously started at 0 (a plain static default), which
+    // made "now - lastCheckMs >= CHECK_INTERVAL" trivially true on the
+    // very first loop() call after every boot — the check fired almost
+    // immediately rather than after a genuine 6h wait. Harmless on its
+    // own (compareVersions() should skip a same-version reflash), but it
+    // meant every boot made an HTTPS round-trip to GitHub within seconds,
+    // and if the tagged release ever legitimately lags local main (as it
+    // did for a stretch this session — v1.6.0 tagged before the home-
+    // screen redesign, later commits never tagged), every single boot
+    // would silently reflash back to that stale release. Baselining to
+    // the first real loop() call means the first genuine check only
+    // happens after a real 6h uptime, matching the documented interval.
+    if (!firstLoopSeen) {
+        firstLoopSeen = true;
+        lastCheckMs = now;
+        return;
+    }
     if (now - lastCheckMs < CHECK_INTERVAL) return;
     lastCheckMs = now;
     checkAndUpdate(false);
