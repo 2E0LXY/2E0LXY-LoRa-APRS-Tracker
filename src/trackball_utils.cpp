@@ -21,6 +21,7 @@ namespace {
     uint32_t lastClickMs = 0;
     bool lastClickState = false;
     bool clickEventPending = false;
+    uint32_t settleUntilMs = 0;   // ignore clicks until this time — see setup()
 
     void resetAccum(uint32_t now) {
         accumStart = now;
@@ -56,13 +57,23 @@ void Trackball_Utils::setup() {
     pinMode(0, INPUT_PULLUP);
     lastClickState = (digitalRead(0) == LOW);
     resetAccum(millis());
+    // GPIO0 is also the BOOT strapping pin, freshly used to enter the
+    // bootloader for this very flash — it may not have settled back to
+    // a clean idle HIGH immediately when this code starts running, and
+    // with lastClickMs also starting at 0 there was no debounce
+    // protection at all for the very first read. A spurious "click"
+    // this early would immediately activate whatever the home screen's
+    // default-selected tile is (Stations, tile 0) before ever showing
+    // the icon grid — matching a bug that persisted through several
+    // other fixes because none of them addressed this specific path.
+    settleUntilMs = millis() + 1000;
 }
 
 void Trackball_Utils::loop() {
     uint32_t now = millis();
 
     bool pressed = (digitalRead(0) == LOW);
-    if (pressed && !lastClickState && (now - lastClickMs) > CLICK_DEBOUNCE_MS) {
+    if (now >= settleUntilMs && pressed && !lastClickState && (now - lastClickMs) > CLICK_DEBOUNCE_MS) {
         clickEventPending = true;
         lastClickMs = now;
     }

@@ -119,6 +119,11 @@ void setup() {
 
     Serial.printf("Callsign: %s  Freq: %.4f MHz  SF%d\n",
         fullCallsign().c_str(), Config.lora.freq, Config.lora.sf);
+
+    // Explicitly (re-)confirm the home screen as the starting view —
+    // harmless belt-and-braces since VIEW_HOME is already the default,
+    // but costs nothing to be explicit about it here.
+    Display_Utils::setView(VIEW_HOME);
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────
@@ -164,16 +169,11 @@ void loop() {
         char k = Keyboard_Utils::getKey();
         if (k) handleKeyInput(k);
     }
-
-    // Trackball input — re-enabled with a simple majority-vote reading
-    // (see trackball_utils.cpp): whichever direction pin was low most
-    // often during each ~80ms window wins, no minimum count or margin
-    // requirement. On the home screen this moves the tile selection
-    // directly; elsewhere it falls back to the same keys the keyboard's
-    // I/O/,/. bindings already use (Map pan/zoom, Setup field
-    // navigation), so it works the same way pressing those keys would.
-    // Centre click still maps to Enter everywhere, matching every view's
-    // existing Enter-to-select/confirm behaviour.
+    // Trackball input — direction re-enabled after ruling it out as the
+    // cause of a separate boot-time issue (home screen defaulting to
+    // Stations on first boot) via a temporary disable-and-test; keeping
+    // it disabled once ruled out would only remove working functionality
+    // for no reason, so it's back.
     Trackball_Utils::loop();
     char tbDir = Trackball_Utils::getDirection();
     if (tbDir && Display_Utils::getView() == VIEW_HOME) {

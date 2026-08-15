@@ -5,6 +5,7 @@
 static String inputBuffer;
 static char   lastKey = 0;
 static uint32_t lastPollMs = 0;
+static uint32_t settleUntilMs = 0;   // ignore reads until this time — see setup()
 
 // T-Deck keyboard: ESP32-C3 co-processor on I2C 0x55.
 // Reading one byte returns the pending keypress, or 0 if none.
@@ -20,14 +21,42 @@ static char readKeyRaw() {
 void Keyboard_Utils::setup() {
     Wire.begin(I2C_SDA, I2C_SCL, 400000);
     pinMode(KB_INT, INPUT_PULLUP);
+    // Ignore reads for the first 500ms — the keyboard co-processor may
+    // not have its I2C register in a clean idle state (returning 0)
+    // immediately after this MCU powers it up, and a stray byte that
+    // happened to land on a bound navigation key (e.g. 't'/'2' for
+    // Stations) could silently fire a real, valid-looking keypress with
+    // no trace it wasn't genuine — a very plausible explanation for a
+    // home screen that reproducibly failed to render even under a
+    // forced, unconditional setView(VIEW_HOME) immediately before the
+    // first draw call.
+    settleUntilMs = millis() + 500;
 }
 
 char Keyboard_Utils::getKey() {
     uint32_t now = millis();
+    if (now < settleUntilMs) return 0;
     if (now - lastPollMs < 20) return 0;  // 50Hz poll cap
     lastPollMs = now;
     char k = readKeyRaw();
     if (k == 0) return 0;
+    // Reject anything that isn't a plausible key: printable ASCII, or
+    // one of the specific control codes this firmware actually treats
+    // as a key (Enter/CR/LF, Backspace/DEL). The I2C keyboard register
+    // has no guarantee of returning a clean 0 when idle — especially
+    // early in boot, before the co-processor has fully initialised —
+    // and a stray garbage byte that happened to decode as a bound
+    // navigation key (e.g. 't'/'2' for Stations) would silently
+    // navigate away from whatever view was meant to show, with no
+    // trace of a real keypress ever happening. This was very likely
+    // the actual explanation for a home screen that reproducibly never
+    // rendered even under a forced, unconditional override immediately
+    // before the first draw — something between that override and the
+    // draw was still successfully calling setView() with a real
+    // (bogus) key value.
+    bool printable = (k >= 0x20 && k < 0x7F);
+    bool controlOk = (k == '\r' || k == '\n' || k == '\b' || k == 0x08 || k == 0x7F);
+    if (!printable && !controlOk) return 0;
     lastKey = k;
     return k;
 }
