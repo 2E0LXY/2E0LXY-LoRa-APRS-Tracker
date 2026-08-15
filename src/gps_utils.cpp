@@ -5,26 +5,43 @@
 
 TinyGPSPlus gps;   // definition of the extern declared in gps_utils.h
 static HardwareSerial gpsSerial(1);
+static GpsModule gpsModule = GpsModule::UNKNOWN;
 
 GPSData gpsData;
 
 void GPS_Utils::setup() {
+    // ── Phase 1: passive probe at the u-blox rate ───────────────────────
+    // A real u-blox M10Q streams NMEA on its own the moment it's powered —
+    // no config needed. An L76K, per this firmware's own testing, stays
+    // silent until actively configured, and is on the wrong baud here
+    // besides. So: listen passively for a short window; if we see several
+    // genuinely checksum-valid sentences, it's u-blox and we're already
+    // done — no commands to send, nothing more to configure. Getting 3+
+    // coincidentally-valid NMEA checksums out of line noise in under two
+    // seconds is astronomically unlikely, so this threshold is a safe
+    // positive signal rather than a fluke.
+    gpsSerial.begin(GPS_UBLOX_BAUD, SERIAL_8N1, GPS_RX, GPS_TX);
+    uint32_t probeStart = millis();
+    while (millis() - probeStart < 1500) {
+        while (gpsSerial.available()) gps.encode(gpsSerial.read());
+    }
+
+    if (gps.passedChecksum() >= 3) {
+        gpsModule = GpsModule::UBLOX;
+        Serial.printf("GPS: u-blox module detected (%d baud, %lu sentences OK) — no config needed\n",
+                      GPS_UBLOX_BAUD, gps.passedChecksum());
+        return;
+    }
+
+    // ── Phase 2: fall back to the L76K probe/config path ────────────────
     // L76K init sequence, matching LilyGO's own factory UnitTest firmware
-    // (examples/UnitTest/UnitTest.ino, setupGPS()) exactly — 9600 baud is
-    // authoritative there (not 38400/19200, which earlier ad-hoc auto-baud
-    // probing on this firmware appeared to match, but were very likely
-    // false positives: a stray '$' byte landing in mis-clocked binary
-    // noise at the wrong rate, not genuine communication). Crucially, the
-    // factory code also actively configures the L76K — sends $PCAS03 to
-    // stop/reset NMEA output, $PCAS06 to read firmware info and confirm
-    // an L76K responded, $PCAS04 to enable GPS+GLONASS, a second $PCAS03
-    // to enable every NMEA sentence type, and $PCAS11 for vehicle
-    // dynamics mode. This firmware never did any of that — it only ever
-    // opened the UART and listened — so even at the correct 9600 baud,
-    // the module may simply not have been configured to output anything
-    // useful yet, which fits everything observed: sometimes silence,
-    // sometimes non-NMEA-shaped bytes.
-    gpsSerial.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
+    // (examples/UnitTest/UnitTest.ino, setupGPS()) exactly: sends $PCAS03
+    // to stop/reset NMEA output, $PCAS06 to read firmware info and
+    // confirm an L76K responded, $PCAS04 to enable GPS+GLONASS, a second
+    // $PCAS03 to enable every NMEA sentence type, and $PCAS11 for vehicle
+    // dynamics mode.
+    gpsSerial.end();
+    gpsSerial.begin(GPS_L76K_BAUD, SERIAL_8N1, GPS_RX, GPS_TX);
 
     bool l76kConfirmed = false;
     for (int i = 0; i < 3 && !l76kConfirmed; i++) {
@@ -49,8 +66,9 @@ void GPS_Utils::setup() {
             delay(500);
         }
     }
+    gpsModule = l76kConfirmed ? GpsModule::L76K : GpsModule::UNKNOWN;
     if (!l76kConfirmed) {
-        Serial.println("GPS: L76K not confirmed via $PCAS06 — configuring anyway (module may still respond to config even if the version probe missed)");
+        Serial.println("GPS: neither u-blox nor L76K confirmed — configuring for L76K anyway (module may still respond even if both probes missed)");
     }
 
     // GPS + GLONASS
@@ -64,7 +82,7 @@ void GPS_Utils::setup() {
     // Vehicle dynamics mode
     gpsSerial.write("$PCAS11,3*1E\r\n");
 
-    Serial.println("GPS: UART initialised (9600 baud, L76K configured)");
+    Serial.printf("GPS: UART initialised (%d baud, %s)\n", GPS_L76K_BAUD, GPS_Utils::moduleName());
 }
 
 void GPS_Utils::loop() {
@@ -101,6 +119,14 @@ float GPS_Utils::courseDeg(){ return gpsData.courseDeg; }
 float GPS_Utils::altM()     { return gpsData.altM; }
 int   GPS_Utils::sats()     { return gpsData.sats; }
 float GPS_Utils::hdop()     { return gpsData.hdop; }
+GpsModule GPS_Utils::detectedModule() { return gpsModule; }
+const char* GPS_Utils::moduleName() {
+    switch (gpsModule) {
+        case GpsModule::UBLOX: return "u-blox";
+        case GpsModule::L76K:  return "L76K";
+        default:                return "unknown";
+    }
+}
 
 // APRS-format latitude: DDMM.hhN
 String GPS_Utils::aprsLat(float lat) {

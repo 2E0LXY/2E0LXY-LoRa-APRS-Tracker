@@ -27,24 +27,24 @@
 #define LORA_RST            17
 #define LORA_BUSY           13
 
-// ── GPS: L76K on T-Deck Plus ──────────────────────────────────────────────
-// Pins AND baud both confirmed authoritative via LilyGO's own factory
-// UnitTest firmware (examples/UnitTest/{utilities.h,UnitTest.ino} in
-// Xinyuan-LilyGO/T-Deck): BOARD_GPS_TX_PIN=43, BOARD_GPS_RX_PIN=44,
-// 9600 baud. The module also needs an active init sequence ($PCAS0x
-// commands) sent to it on boot — see GPS_Utils::setup() in
-// gps_utils.cpp — the L76K doesn't necessarily output full NMEA on its
-// own without it, which is very likely why plain listening at 9600
-// with no config produced nothing recognisable. An earlier on-device
-// auto-baud probe (now removed) appeared to find valid-looking data at
-// 38400/19200, but those were almost certainly false positives — a
-// stray '$' byte landing inside mis-clocked binary noise at the wrong
-// bit rate, not genuine communication (the factory reference is
-// unambiguous on 9600, and a UBX-format module wouldn't explain the
-// $PCAS/L76K-specific config this module apparently needs).
+// ── GPS: L76K or u-blox M10Q on T-Deck Plus ───────────────────────────────
+// Pins confirmed via LilyGO's factory UnitTest firmware: BOARD_GPS_TX_PIN=43,
+// BOARD_GPS_RX_PIN=44. T-Deck Plus ships GPS as one of TWO variants
+// (LilyGO sells both): L76K @ 9600 baud (Quectel $PCAS* commands,
+// silent until actively configured), or u-blox M10Q @ 38400 baud (UBX/
+// default NMEA, streams on its own with no config needed).
+//
+// As of 2026-08, GPS_Utils::setup() auto-detects which is present at
+// boot (passive-listens at UBLOX_BAUD first; a real u-blox answers with
+// clean NMEA almost immediately, an L76K stays silent and it falls back
+// to the L76K probe/config path at L76K_BAUD) — no per-unit #define
+// edit needed any more. These two constants are the full set of rates
+// the detection logic tries; add a third here plus a branch in
+// GPS_Utils::setup() if a future variant ships at a different baud.
 #define GPS_TX              43   // ESP32 TX → GPS RX
 #define GPS_RX              44   // GPS TX → ESP32 RX
-#define GPS_BAUD            9600
+#define GPS_L76K_BAUD        9600
+#define GPS_UBLOX_BAUD       38400
 
 // ── I2C (keyboard, trackball, touch) ─────────────────────────────────────
 #define I2C_SDA             18

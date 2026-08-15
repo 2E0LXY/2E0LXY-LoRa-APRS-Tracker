@@ -19,6 +19,8 @@ struct GPSData {
 };
 extern GPSData gpsData;
 
+enum class GpsModule : uint8_t { UNKNOWN, L76K, UBLOX };
+
 namespace GPS_Utils {
     void   setup();
     void   loop();
@@ -30,6 +32,8 @@ namespace GPS_Utils {
     float  altM();
     int    sats();
     float  hdop();
+    GpsModule detectedModule();
+    const char* moduleName();
     String aprsLat(float lat);
     String aprsLon(float lon);
     float  headingDelta(float a, float b);
