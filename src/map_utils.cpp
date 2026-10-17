@@ -5,6 +5,7 @@
 #include "aprs_utils.h"
 #include "display_utils.h"
 #include "aprs_icons.h"
+#include "aprs_symbol_compose.h"
 #include <TFT_eSPI.h>
 #include <PNGdec.h>
 #include <SD.h>
@@ -101,14 +102,12 @@ namespace {
         }
     }
 
-    // Look up the icon array + palette for a 2-char APRS symbol ("table"+"code").
-    const uint16_t* iconFor(const String& sym) {
-        if (sym.length() < 2) return nullptr;
-        char table = sym[0];
-        char code  = sym[1];
-        int idx = (int)code - 33;
-        if (idx < 0 || idx >= APRS_ICON_COUNT) return nullptr;
-        return (table == '/') ? APRS_ICONS_PRIMARY[idx] : APRS_ICONS_ALT[idx];
+    // Compose the official icon for a 2-char APRS symbol ("table"+"code") into out[256].
+    // Handles overlay characters (A-Z, 0-9, compressed a-j); invalid symbols draw the official dot.
+    void iconFor(const String& sym, uint16_t* out) {
+        char table = sym.length() >= 1 ? sym[0] : '/';
+        char code  = sym.length() >= 2 ? sym[1] : '/';
+        AprsSymbolCompose::compose(table, code, out);
     }
 }
 
@@ -180,8 +179,8 @@ void Map_Utils::draw() {
         lonLatToPixel(s.lon, s.lat, px, py);
         if (px < -APRS_ICON_SIZE || px > SCREEN_WIDTH || py < MAP_TOP - APRS_ICON_SIZE || py > MAP_TOP + MAP_H)
             continue;
-        const uint16_t* icon = iconFor(s.symbol);
-        if (!icon) continue;
+        uint16_t icon[APRS_ICON_SIZE * APRS_ICON_SIZE];
+        iconFor(s.symbol, icon);
         Display_Utils::mapPushIcon(px - APRS_ICON_SIZE / 2, py - APRS_ICON_SIZE, icon,
                                     APRS_ICON_SIZE, APRS_ICON_TRANSPARENT);
     }
